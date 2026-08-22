@@ -1,0 +1,97 @@
+<div data-proj="{{ d.proj_nr }}">
+    <div class="flex-gap align-center mb-2" style="justify-content: space-between; flex-wrap: wrap;">
+        <div class="flex-gap align-center">
+            <button type="button" class="btn" id="nachInforBtn" onclick="toggleInforSpalten()">&#10132; Nach Infor übertragen</button>
+        </div>
+        <div class="form-field" style="min-width:220px;">
+            <label class="field-label" for="proc_filter">Filter: Process</label>
+            <select id="proc_filter" onchange="ladeProjektdetails(this.value)">
+                <option value="">Alle Prozesse</option>
+                {% for p in d.processes %}
+                <option value="{{ p }}" {% if d.proc_filter == p %}selected{% endif %}>{{ p }}</option>
+                {% endfor %}
+            </select>
+        </div>
+    </div>
+
+    {% if not d.groups %}
+    <p class="text-muted">Keine Daten für dieses Projekt gefunden.</p>
+    {% else %}
+    <form method="POST" action="{{ url_for('bewerten.infor_uebernehmen') }}">
+        <input type="hidden" name="proj_nr" value="{{ d.proj_nr }}">
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th class="infor-col hidden">Übernehmen</th>
+                    <th>Prozess / Subprozess</th>
+                    <th class="text-right">MTT (min)</th>
+                    <th class="text-right">PTT (min)</th>
+                    <th class="text-right">Abw.</th>
+                    <th class="text-right">Abw. %</th>
+                    <th>Status</th>
+                    <th class="infor-col hidden">Korrektur board_tactTime_brutto</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for g in d.groups %}
+                {% set p = g.process_row %}
+                <tr class="text-bold">
+                    <td class="infor-col hidden">
+                        <input type="checkbox" name="uebernehmen" value="{{ p.process }}" onchange="toggleKorrektur(this)">
+                    </td>
+                    <td>{{ p.process }} <span class="text-sm text-muted">({{ p.sub_process_count }} Subprozess(e))</span></td>
+                    <td class="num">{{ "%.4f"|format(p.mtt) if p.mtt is not none else "–" }}</td>
+                    <td class="num">{{ "%.4f"|format(p.ptt) if p.ptt is not none else "–" }}</td>
+                    <td class="num">{{ "%.4f"|format(p.abweichung) if p.abweichung is not none else "–" }}</td>
+                    <td class="num">{{ "%.1f"|format(p.abweichung_pct) ~ "%" if p.abweichung_pct is not none else "–" }}</td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if p.status=='ok' else ('warning' if p.status=='warn' else ('error' if p.status=='action' else 'muted')) }}">
+                            {{ p.status_label }}
+                        </span>
+                    </td>
+                    <td class="infor-col hidden">
+                        <input type="text" id="korrektur_{{ p.process }}" name="korrektur_{{ p.process }}"
+                               value="{{ '%.4f'|format(p.mtt) if p.mtt is not none else '' }}" disabled style="width:110px;">
+                    </td>
+                </tr>
+                {% for s in g.sub_rows %}
+                <tr>
+                    <td class="infor-col hidden"></td>
+                    <td style="padding-left:20px;">
+                        <a href="#" onclick="oeffneProcessPopup('{{ d.proj_nr }}', '{{ s.process }}'); return false;">
+                            &#8627; {{ s.subProcess }}
+                        </a>
+                    </td>
+                    <td class="num">{{ "%.4f"|format(s.mtt) if s.mtt is not none else "–" }}</td>
+                    <td class="num">{{ "%.4f"|format(s.ptt) if s.ptt is not none else "–" }}</td>
+                    <td class="num">{{ "%.4f"|format(s.abweichung) if s.abweichung is not none else "–" }}</td>
+                    <td class="num">{{ "%.1f"|format(s.abweichung_pct) ~ "%" if s.abweichung_pct is not none else "–" }}</td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if s.status=='ok' else ('warning' if s.status=='warn' else ('error' if s.status=='action' else 'muted')) }} text-sm">
+                            {{ s.status_label }}
+                        </span>
+                    </td>
+                    <td class="infor-col hidden"></td>
+                </tr>
+                {% endfor %}
+                {% endfor %}
+                </tbody>
+                <tfoot>
+                <tr>
+                    <td class="infor-col hidden"></td>
+                    <td>Summe (board / panel tactTime brutto)</td>
+                    <td class="num" colspan="2">{{ "%.4f"|format(d.totals.board_tactTime_brutto_sum) }}</td>
+                    <td class="num" colspan="2">{{ "%.4f"|format(d.totals.panel_tactTime_brutto_sum) }}</td>
+                    <td></td>
+                    <td class="infor-col hidden"></td>
+                </tr>
+                </tfoot>
+            </table>
+        </div>
+        <div class="form-actions">
+            <button type="submit" id="inforUebernehmenBtn" class="btn btn-primary hidden">&#10003; Übernehmen</button>
+        </div>
+    </form>
+    {% endif %}
+</div>

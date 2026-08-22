@@ -1,0 +1,219 @@
+{% extends "base.html" %}
+{% block title %}Konfiguration – {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">Konfiguration</div>
+        <div class="page-subtitle">Grenzwerte, SQL-Server, Webserver, PTT-Pflege, Nutzerrechte</div>
+    </div>
+</div>
+
+<div class="content-section">
+    <div class="content-section-header">Übersicht</div>
+    <div class="content-section-body">
+        <div class="btn-group">
+            <button type="button" class="btn btn-primary" onclick="openModal('modalGrenzwerte')">&#128200; Grenzwerte definieren</button>
+            <button type="button" class="btn btn-primary" onclick="openModal('modalServer')">&#128421; SQL-Server konfigurieren</button>
+            <button type="button" class="btn btn-primary" onclick="openModal('modalWebserver')">&#127760; Webserver konfigurieren</button>
+            <button type="button" class="btn btn-primary" onclick="openModal('modalPtt')">&#9998; PTT-Pflege (Übergangslösung)</button>
+            <form method="GET" action="{{ url_for('konfiguration.nutzerrechte') }}" style="display:inline;">
+                <button type="submit" class="btn">&#128274; Rechte (kommt später)</button>
+            </form>
+        </div>
+
+        <div class="form-grid mt-3">
+            <div>
+                <div class="field-label">Aktiver Server</div>
+                <div class="text-bold">{{ servers[active_server].label if active_server in servers else "keiner" }}</div>
+            </div>
+            <div>
+                <div class="field-label">Warngrenze</div>
+                <div>{{ thresholds.warn_lower_pct }}% &hellip; {{ thresholds.warn_upper_pct }}%</div>
+            </div>
+            <div>
+                <div class="field-label">Aktionsgrenze</div>
+                <div>{{ thresholds.action_lower_pct }}% &hellip; {{ thresholds.action_upper_pct }}%</div>
+            </div>
+            <div>
+                <div class="field-label">Webserver</div>
+                <div>{{ webserver.host }}:{{ webserver.port }}</div>
+            </div>
+        </div>
+
+        <form method="POST" action="{{ url_for('konfiguration.bearbeiter_speichern') }}" class="form-row mt-3">
+            <div class="form-field">
+                <label class="field-label" for="current_user">Aktueller Bearbeiter (Name)</label>
+                <input type="text" id="current_user" name="current_user" value="{{ current_user }}" placeholder="Vor- und Nachname">
+            </div>
+            <button type="submit" class="btn">Speichern</button>
+        </form>
+        <p class="text-sm text-muted mt-1">
+            Wird als "Name" in den Dokumentationstabellen (teCalc_COR_tactTimesCheck /
+            teCalc_COR_INFORchanges) gespeichert. Eine echte Anmeldung/Nutzerverwaltung ist
+            laut Vorgabe noch nicht spezifiziert (Access/Security &ndash; TBD).
+        </p>
+    </div>
+</div>
+
+<!-- ===== Modal: Grenzwerte definieren ===== -->
+<div class="modal-backdrop hidden" id="modalGrenzwerte">
+    <div class="modal-box">
+        <div class="modal-header">
+            <span>Grenzwerte definieren</span>
+            <span class="modal-close" onclick="closeModal('modalGrenzwerte')">&#10005;</span>
+        </div>
+        <form method="POST" action="{{ url_for('konfiguration.grenzwerte_speichern') }}">
+            <div class="modal-body">
+                <p class="text-sm text-muted mb-2">
+                    Die Warngrenze (orange) muss innerhalb der Aktionsgrenze (rot) liegen.
+                </p>
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="field-label" for="warn_lower_pct">Warngrenze unten (%)</label>
+                        <input type="text" id="warn_lower_pct" name="warn_lower_pct" value="{{ thresholds.warn_lower_pct }}">
+                    </div>
+                    <div class="form-field">
+                        <label class="field-label" for="warn_upper_pct">Warngrenze oben (%)</label>
+                        <input type="text" id="warn_upper_pct" name="warn_upper_pct" value="{{ thresholds.warn_upper_pct }}">
+                    </div>
+                    <div class="form-field">
+                        <label class="field-label" for="action_lower_pct">Aktionsgrenze unten (%)</label>
+                        <input type="text" id="action_lower_pct" name="action_lower_pct" value="{{ thresholds.action_lower_pct }}">
+                    </div>
+                    <div class="form-field">
+                        <label class="field-label" for="action_upper_pct">Aktionsgrenze oben (%)</label>
+                        <input type="text" id="action_upper_pct" name="action_upper_pct" value="{{ thresholds.action_upper_pct }}">
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeModal('modalGrenzwerte')">Abbrechen</button>
+                <button type="submit" class="btn btn-primary">Speichern</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== Modal: SQL-Server konfigurieren ===== -->
+<div class="modal-backdrop hidden" id="modalServer">
+    <div class="modal-box">
+        <div class="modal-header">
+            <span>SQL-Server konfigurieren</span>
+            <span class="modal-close" onclick="closeModal('modalServer')">&#10005;</span>
+        </div>
+        <form method="POST" action="{{ url_for('konfiguration.server_speichern') }}">
+            <div class="modal-body">
+                <p class="text-sm text-muted mb-2">Es kann jeweils zu genau einem Server verbunden werden.</p>
+                {% for key, srv in servers.items() %}
+                <label class="flex-gap align-center mb-2" style="cursor:pointer;">
+                    <input type="radio" name="server_key" value="{{ key }}" {% if key == active_server %}checked{% endif %}>
+                    <span>
+                        <span class="text-bold">{{ srv.label }}</span><br>
+                        <span class="text-sm text-muted">
+                            {% if srv.driver == 'mssql' %}
+                                {{ srv.server }} / {{ srv.database }} (MS SQL Server)
+                            {% else %}
+                                lokale SQLite-Datei, Beispieldaten aus data/*.csv
+                            {% endif %}
+                        </span>
+                    </span>
+                </label>
+                {% endfor %}
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeModal('modalServer')">Abbrechen</button>
+                <button type="submit" class="btn btn-primary">Verbinden &amp; speichern</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== Modal: Webserver konfigurieren ===== -->
+<div class="modal-backdrop hidden" id="modalWebserver">
+    <div class="modal-box">
+        <div class="modal-header">
+            <span>Webserver konfigurieren</span>
+            <span class="modal-close" onclick="closeModal('modalWebserver')">&#10005;</span>
+        </div>
+        <form method="POST" action="{{ url_for('konfiguration.webserver_speichern') }}">
+            <div class="modal-body">
+                <div class="form-grid">
+                    <div class="form-field">
+                        <label class="field-label" for="host">Host</label>
+                        <input type="text" id="host" name="host" value="{{ webserver.host }}">
+                    </div>
+                    <div class="form-field">
+                        <label class="field-label" for="port">Port</label>
+                        <input type="text" id="port" name="port" value="{{ webserver.port }}">
+                    </div>
+                </div>
+                <p class="text-sm text-muted mt-2">Änderungen wirken erst nach einem Neustart der Anwendung.</p>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn" onclick="closeModal('modalWebserver')">Abbrechen</button>
+                <button type="submit" class="btn btn-primary">Speichern</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<!-- ===== Modal: PTT-Pflege (Übergangslösung, bis Leitstand-Anbindung <TBD> steht) ===== -->
+<div class="modal-backdrop hidden" id="modalPtt">
+    <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+            <span>PTT-Pflege (Übergangslösung)</span>
+            <span class="modal-close" onclick="closeModal('modalPtt')">&#10005;</span>
+        </div>
+        <div class="modal-body">
+            <p class="text-sm text-muted mb-2">
+                Die Anbindung der Plan-Taktzeiten (PTT) aus dem Leitstand ist laut Vorgabe
+                noch nicht spezifiziert. Bis dahin können PTT-Werte hier je Projekt/Prozess/
+                Subprozess manuell gepflegt werden.
+            </p>
+            <form method="POST" action="{{ url_for('konfiguration.ptt_speichern') }}" class="form-row mb-3">
+                <div class="form-field"><label class="field-label" for="ptt_projNr">projNr</label><input type="text" id="ptt_projNr" name="projNr" required></div>
+                <div class="form-field"><label class="field-label" for="ptt_process">process</label><input type="text" id="ptt_process" name="process" required></div>
+                <div class="form-field"><label class="field-label" for="ptt_subProcess">subProcess</label><input type="text" id="ptt_subProcess" name="subProcess" required></div>
+                <div class="form-field"><label class="field-label" for="ptt_value">PTT (min)</label><input type="text" id="ptt_value" name="ptt" required></div>
+                <button type="submit" class="btn btn-primary">Speichern</button>
+            </form>
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                    <tr><th>projNr</th><th>process</th><th>subProcess</th><th class="text-right">PTT</th><th>zuletzt geändert</th><th></th></tr>
+                    </thead>
+                    <tbody>
+                    {% for r in ptt_rows %}
+                    <tr>
+                        <td>{{ r.projNr }}</td><td>{{ r.process }}</td><td>{{ r.subProcess }}</td>
+                        <td class="num">{{ "%.4f"|format(r.ptt) }}</td>
+                        <td class="text-sm">{{ r.updated_by }} &ndash; {{ r.updated_at }}</td>
+                        <td>
+                            <form method="POST" action="{{ url_for('konfiguration.ptt_loeschen') }}" onsubmit="return confirm('PTT-Eintrag löschen?')">
+                                <input type="hidden" name="projNr" value="{{ r.projNr }}">
+                                <input type="hidden" name="process" value="{{ r.process }}">
+                                <input type="hidden" name="subProcess" value="{{ r.subProcess }}">
+                                <button type="submit" class="btn btn-sm btn-danger">Löschen</button>
+                            </form>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="6" class="text-muted">Noch keine manuellen PTT-Werte gepflegt.</td></tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn" onclick="closeModal('modalPtt')">Schließen</button>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
+function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
+</script>
+{% endblock %}

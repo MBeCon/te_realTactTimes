@@ -1,0 +1,17 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ app_name }} – beendet</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body style="display:flex;align-items:center;justify-content:center;height:100vh;">
+    <div class="content-section" style="width:360px;">
+        <div class="content-section-header">{{ app_name }}</div>
+        <div class="content-section-body text-center">
+            <p>Die Anwendung wird beendet.</p>
+            <p class="text-sm text-muted">Dieses Browser-Fenster kann geschlossen werden.</p>
+        </div>
+    </div>
+</body>
+</html>

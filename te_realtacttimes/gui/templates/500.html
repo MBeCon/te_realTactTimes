@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}Fehler – {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">500 – Interner Fehler</div>
+        <div class="page-subtitle">Es ist ein unerwarteter Fehler aufgetreten. Details siehe app.log.</div>
+    </div>
+</div>
+<div class="content-section">
+    <div class="content-section-body">
+        <a class="btn btn-primary" href="{{ url_for('main.index') }}">Zur Startseite</a>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}{{ app_name }}{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+    {% block extra_head %}{% endblock %}
+</head>
+<body class="{% block body_class %}{% endblock %}">
+<div class="app-wrapper">
+    <header class="app-header">
+        <div class="header-logo">
+            {% if logo_exists %}
+                <img src="{{ url_for('static', filename='images/' ~ logo_filename) }}" alt="{{ firma }} Logo">
+            {% else %}
+                <span class="logo-placeholder">te</span>
+            {% endif %}
+        </div>
+        <div class="header-title">
+            {{ app_full_name }}
+            <span>{{ firma }} &ndash; {{ app_description }}</span>
+        </div>
+        <div class="header-actions">
+            <div class="server-indicator" title="{{ servers[active_server].label if active_server in servers else 'Kein Server' }}">
+                <span class="dot {% if active_server %}connected{% else %}disconnected{% endif %}"></span>
+                {{ servers[active_server].label if active_server in servers else "Kein Server verbunden" }}
+            </div>
+            <form method="POST" action="{{ url_for('main.shutdown') }}"
+                  onsubmit="return confirm('Anwendung wirklich beenden?')">
+                <button type="submit" class="btn btn-sm">&#10005; Software beenden</button>
+            </form>
+        </div>
+    </header>
+
+    <nav class="app-sidebar" id="appSidebar">
+        <div class="sidebar-toggle" onclick="toggleSidebar()">
+            <span id="sidebarToggleIcon">&#9664;</span>
+        </div>
+        <div class="sidebar-section">
+            <div class="sidebar-section-title sidebar-text">Navigation</div>
+            <div class="sidebar-nav">
+                <a href="{{ url_for('main.index') }}"
+                   class="{% if request.endpoint == 'main.index' %}active{% endif %} sidebar-text">
+                    &#127968; Startseite
+                </a>
+                <a href="{{ url_for('bewerten.index') }}"
+                   class="{% if request.endpoint and request.endpoint.startswith('bewerten.') %}active{% endif %} sidebar-text">
+                    &#128202; Bewerten
+                </a>
+                <a href="{{ url_for('konfiguration.index') }}"
+                   class="{% if request.endpoint and request.endpoint.startswith('konfiguration.') %}active{% endif %} sidebar-text">
+                    &#9881; Konfiguration
+                </a>
+                <a href="#" onclick="alert('KPIs sind laut Vorgabe noch nicht implementiert (kommt später).'); return false;"
+                   class="disabled sidebar-text" title="kommt später">
+                    &#128200; KPIs
+                </a>
+            </div>
+        </div>
+        {% block sidebar_extra %}{% endblock %}
+    </nav>
+
+    <main class="app-main">
+        {% block content %}{% endblock %}
+    </main>
+
+    <footer class="app-footer">
+        <a href="{{ firma_url }}" target="_blank" rel="noopener">{{ firma_url.replace('https://', '').replace('http://', '') }}</a>
+        &nbsp;|&nbsp; {{ app_name }} v{{ app_version }}
+    </footer>
+</div>
+
+<div class="flash-container" id="flashContainer">
+    {% with messages = get_flashed_messages(with_categories=true) %}
+        {% for category, message in messages %}
+        <div class="flash-msg {{ category }}">
+            <span>{{ message }}</span>
+            <button class="flash-close" onclick="this.parentElement.remove()">&#10005;</button>
+        </div>
+        {% endfor %}
+    {% endwith %}
+</div>
+
+<script>
+function toggleSidebar() {
+    const sb = document.getElementById('appSidebar');
+    const icon = document.getElementById('sidebarToggleIcon');
+    sb.classList.toggle('collapsed');
+    icon.textContent = sb.classList.contains('collapsed') ? '▶' : '◀';
+    document.querySelectorAll('.sidebar-text').forEach(el => {
+        el.style.display = sb.classList.contains('collapsed') ? 'none' : '';
+    });
+    localStorage.setItem('sidebarCollapsed', sb.classList.contains('collapsed'));
+}
+setTimeout(() => document.querySelectorAll('.flash-msg').forEach(el => el.remove()), 6000);
+window.addEventListener('DOMContentLoaded', () => {
+    if (localStorage.getItem('sidebarCollapsed') === 'true') {
+        document.getElementById('appSidebar').classList.add('collapsed');
+        document.getElementById('sidebarToggleIcon').textContent = '▶';
+        document.querySelectorAll('.sidebar-text').forEach(el => el.style.display = 'none');
+    }
+});
+</script>
+{% block extra_scripts %}{% endblock %}
+</body>
+</html>

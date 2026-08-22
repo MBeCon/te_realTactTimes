@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Startseite – {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">Startseite</div>
+        <div class="page-subtitle">{{ app_description }}</div>
+    </div>
+</div>
+
+<div class="home-hero">
+    <div class="home-hero-image">
+        <img src="{{ url_for('static', filename='images/Titelbild_realTactTimes.png') }}" alt="Titelbild teRealTactTimes">
+    </div>
+    <div class="home-hero-actions">
+        <a href="{{ url_for('bewerten.index') }}" class="btn btn-primary">&#128202; Bewerten</a>
+        <a href="{{ url_for('konfiguration.index') }}" class="btn">&#9881; Konfiguration</a>
+        <a href="#" onclick="alert('KPIs sind laut Vorgabe noch nicht implementiert (kommt später).'); return false;" class="btn">&#128200; KPIs</a>
+    </div>
+</div>
+
+<div class="content-section mt-3">
+    <div class="content-section-header">
+        Server-Verbindung
+        <span class="info-icon" title="Es kann jeweils zu genau einem SQL-Server verbunden werden. Umschalten auch über Konfiguration möglich.">?</span>
+    </div>
+    <div class="content-section-body">
+        <form method="POST" action="{{ url_for('main.server_wechseln') }}" class="form-row">
+            <div class="form-field" style="min-width:280px;">
+                <label class="field-label" for="server_key">Server auswählen</label>
+                <select name="server_key" id="server_key">
+                    {% for key, srv in servers.items() %}
+                    <option value="{{ key }}" {% if key == active_server %}selected{% endif %}>{{ srv.label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button type="submit" class="btn btn-primary">Verbinden</button>
+        </form>
+        <p class="text-sm text-muted mt-2">
+            Aktiv: <span class="text-bold text-primary">{{ servers[active_server].label if active_server in servers else "keiner" }}</span>
+            &mdash; Details und weitere Server-Einstellungen unter
+            <a href="{{ url_for('konfiguration.index') }}">Konfiguration</a>.
+        </p>
+    </div>
+</div>
+{% endblock %}

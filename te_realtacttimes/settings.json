@@ -1,0 +1,14 @@
+{
+  "active_server": "mbe",
+  "thresholds": {
+    "warn_lower_pct": -10.0,
+    "warn_upper_pct": 10.0,
+    "action_lower_pct": -25.0,
+    "action_upper_pct": 25.0
+  },
+  "current_user": "Manfred Brunner",
+  "webserver": {
+    "host": "127.0.0.1",
+    "port": 5000
+  }
+}

@@ -1,0 +1,161 @@
+{% extends "base.html" %}
+{% block title %}Bewerten – {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">Bewerten</div>
+        <div class="page-subtitle">Gegenüberstellung MTT (Ist) vs. PTT (Soll) je Projekt und Prozess</div>
+    </div>
+    <div class="page-actions">
+        <form method="POST" action="{{ url_for('bewerten.ttcheck') }}">
+            {% for k, v in {'sort': sort_by, 'dir': 'desc' if descending else 'asc', 'proj_nr': proj_nr_filter, 'process': process_filter, 'lot': lot_filter, 'status': status_filter}.items() %}
+                {% if v %}<input type="hidden" name="{{ k }}" value="{{ v }}">{% endif %}
+            {% endfor %}
+            <button type="submit" class="btn btn-primary">&#9654; TTCheck ausführen</button>
+        </form>
+    </div>
+</div>
+
+<div class="content-section">
+    <div class="content-section-header">
+        TactTimeCheck [TTCheck]
+        <span class="info-icon" title="Vergleicht MTT (aus MAR_TactTimesCalc) mit PTT je projNr/process. Grenzwerte siehe Konfiguration.">?</span>
+    </div>
+    <div class="content-section-body">
+        <form method="GET" action="{{ url_for('bewerten.index') }}" class="form-row mb-2">
+            <input type="hidden" name="ran" value="{{ '1' if ran else '0' }}">
+            <div class="form-field">
+                <label class="field-label" for="proj_nr">Projektnummer</label>
+                <input type="text" id="proj_nr" name="proj_nr" value="{{ proj_nr_filter }}" placeholder="z.B. 0067">
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="process">Prozess</label>
+                <input type="text" id="process" name="process" value="{{ process_filter }}" placeholder="z.B. SMT">
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="lot">Los (Lot)</label>
+                <input type="text" id="lot" name="lot" value="{{ lot_filter }}" placeholder="z.B. K25.000...">
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="status">Grenzwert-Status</label>
+                <select id="status" name="status">
+                    <option value="" {% if not status_filter %}selected{% endif %}>Alle</option>
+                    {% for key, label in status_labels.items() %}
+                    <option value="{{ key }}" {% if status_filter == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="sort">Sortieren nach</label>
+                <select id="sort" name="sort">
+                    <option value="projNr" {% if sort_by == 'projNr' %}selected{% endif %}>Projektnummer</option>
+                    <option value="process" {% if sort_by == 'process' %}selected{% endif %}>Prozess</option>
+                    <option value="abweichung_pct" {% if sort_by == 'abweichung_pct' %}selected{% endif %}>Größe der Abweichung</option>
+                </select>
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="dir">Richtung</label>
+                <select id="dir" name="dir">
+                    <option value="asc" {% if not descending %}selected{% endif %}>Aufsteigend</option>
+                    <option value="desc" {% if descending %}selected{% endif %}>Absteigend</option>
+                </select>
+            </div>
+            <button type="submit" class="btn">Filtern / Sortieren</button>
+        </form>
+
+        {% if not ran %}
+        <p class="text-muted">Noch keine Bewertung durchgeführt. Bitte oben rechts <span class="text-bold">TTCheck ausführen</span> klicken.</p>
+        {% elif error %}
+        <p class="text-error">{{ error }}</p>
+        {% elif not rows %}
+        <p class="text-muted">Keine Ergebnisse für die aktuelle Filterung.</p>
+        {% else %}
+        <div class="table-wrapper">
+            <table class="data-table">
+                <thead>
+                <tr>
+                    <th>Projektnummer</th>
+                    <th>Prozess</th>
+                    <th class="text-right">MTT (min)</th>
+                    <th class="text-right">PTT (min)</th>
+                    <th class="text-right">Abw.</th>
+                    <th class="text-right">Abw. %</th>
+                    <th>Status</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for r in rows %}
+                <tr class="clickable" onclick="location.href='{{ url_for('bewerten.index', selected_proj=r.projNr, sort=sort_by, dir='desc' if descending else 'asc', proj_nr=proj_nr_filter, process=process_filter, lot=lot_filter, status=status_filter, ran=1) }}'">
+                    <td class="text-bold text-primary">{{ r.projNr }}</td>
+                    <td>{{ r.process }}</td>
+                    <td class="num">{{ "%.4f"|format(r.mtt) if r.mtt is not none else "–" }}</td>
+                    <td class="num">{{ "%.4f"|format(r.ptt) if r.ptt is not none else "–" }}</td>
+                    <td class="num">{{ "%.4f"|format(r.abweichung) if r.abweichung is not none else "–" }}</td>
+                    <td class="num">{{ "%.1f"|format(r.abweichung_pct) ~ "%" if r.abweichung_pct is not none else "–" }}</td>
+                    <td>
+                        <span class="badge badge-{{ 'success' if r.status=='ok' else ('warning' if r.status=='warn' else ('error' if r.status=='action' else 'muted')) }}">
+                            {{ r.status_label }}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-sm text-muted mt-2">{{ rows|length }} Zeile(n). Zeile anklicken für Projektdetails.</p>
+        {% endif %}
+    </div>
+</div>
+
+{% if selected_proj %}
+<div class="content-section" id="projektdetailsSection">
+    <div class="content-section-header">
+        Projektdetails – {{ selected_proj }}
+    </div>
+    <div class="content-section-body" id="projektdetailsBody">
+        {% set d = projektdetails %}
+        {% include "bewerten/_projektdetails.html" %}
+    </div>
+</div>
+{% endif %}
+
+<div id="processModalContainer"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function ladeProjektdetails(procFilter) {
+    const projNr = document.getElementById('projektdetailsBody').dataset.proj;
+    const url = '{{ url_for("bewerten.projekt_partial", proj_nr="__PROJ__") }}'.replace('__PROJ__', encodeURIComponent(projNr))
+        + (procFilter ? ('?proc_filter=' + encodeURIComponent(procFilter)) : '');
+    fetch(url).then(r => r.text()).then(html => {
+        document.getElementById('projektdetailsBody').innerHTML = html;
+    });
+}
+
+function toggleInforSpalten() {
+    document.querySelectorAll('.infor-col').forEach(el => el.classList.remove('hidden'));
+    const btn = document.getElementById('inforUebernehmenBtn');
+    if (btn) btn.classList.remove('hidden');
+    const startBtn = document.getElementById('nachInforBtn');
+    if (startBtn) startBtn.classList.add('hidden');
+}
+
+function toggleKorrektur(cb) {
+    const input = document.getElementById('korrektur_' + cb.value);
+    if (input) input.disabled = !cb.checked;
+}
+
+function oeffneProcessPopup(projNr, process) {
+    const url = '{{ url_for("bewerten.prozess_popup", proj_nr="__PROJ__", process="__PROC__") }}'
+        .replace('__PROJ__', encodeURIComponent(projNr)).replace('__PROC__', encodeURIComponent(process));
+    fetch(url).then(r => r.text()).then(html => {
+        document.getElementById('processModalContainer').innerHTML = html;
+    });
+}
+
+function schliesseProcessPopup() {
+    document.getElementById('processModalContainer').innerHTML = '';
+}
+</script>
+{% endblock %}

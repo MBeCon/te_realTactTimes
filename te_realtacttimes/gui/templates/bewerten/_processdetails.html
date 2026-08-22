@@ -1,0 +1,50 @@
+<div class="modal-backdrop" onclick="if(event.target===this) schliesseProcessPopup()">
+    <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+            <span>Processdetails – {{ proj_nr }} / {{ process }}</span>
+            <span class="modal-close" onclick="schliesseProcessPopup()">&#10005;</span>
+        </div>
+        <div class="modal-body">
+            {% if not rows %}
+            <p class="text-muted">Keine Detaildaten in MAR_TactTimes für diesen Prozess gefunden.</p>
+            {% else %}
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Lot</th>
+                        <th>Subprozess</th>
+                        <th>Maschine</th>
+                        <th class="text-right">Boards</th>
+                        <th class="text-right">Panels</th>
+                        <th class="text-right">tactTime_brutto</th>
+                        <th class="text-right">tactTime_netto</th>
+                        <th class="text-right">testDauer</th>
+                        <th>ManufacturingTime</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for r in rows %}
+                    <tr>
+                        <td>{{ r.lot }}</td>
+                        <td>{{ r.subProcess }}</td>
+                        <td>{{ r.machineId }}</td>
+                        <td class="num">{{ r.boards|int if r.boards is not none else "–" }}</td>
+                        <td class="num">{{ r.panels|int if r.panels is not none else "–" }}</td>
+                        <td class="num">{{ "%.4f"|format(r.tactTime_brutto) if r.tactTime_brutto is not none else "–" }}</td>
+                        <td class="num">{{ "%.4f"|format(r.tactTime_netto) if r.tactTime_netto is not none else "–" }}</td>
+                        <td class="num">{{ "%.4f"|format(r.testDauer) if r.testDauer is not none else "–" }}</td>
+                        <td>{{ r.ManufacturingTime }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-sm text-muted mt-2">{{ rows|length }} Los(e), sortiert nach Lot und ManufacturingTime.</p>
+            {% endif %}
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn" onclick="schliesseProcessPopup()">Schließen</button>
+        </div>
+    </div>
+</div>
