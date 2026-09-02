@@ -1,0 +1,11 @@
+<div class="modal-backdrop" onclick="if(event.target===this) schliesseProjektdetailsPopup()">
+    <div class="modal-box modal-box-xl">
+        <div class="modal-header">
+            <span>Projektdetails – {{ d.proj_nr }}</span>
+            <span class="modal-close" onclick="schliesseProjektdetailsPopup()">&#10005;</span>
+        </div>
+        <div class="modal-body" id="projektdetailsBody" data-proj="{{ d.proj_nr }}">
+            {% include "bewerten/_projektdetails.html" %}
+        </div>
+    </div>
+</div>

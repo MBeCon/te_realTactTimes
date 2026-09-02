@@ -1,0 +1,176 @@
+{% extends "base.html" %}
+{% block title %}Manuelle PTT-Eingabe – {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">Manuelle PTT-Eingabe</div>
+        <div class="page-subtitle">Übergangslösung, solange die Anbindung der Plan-Taktzeiten aus dem Leitstand noch nicht spezifiziert ist</div>
+    </div>
+</div>
+
+<div class="content-section">
+    <div class="content-section-header">PTT-Pflege</div>
+    <div class="content-section-body">
+        <p class="text-sm text-muted mb-2">
+            Die Anbindung der Plan-Taktzeiten (PTT) aus dem Leitstand ist laut Vorgabe
+            noch nicht spezifiziert. Bis dahin können PTT-Werte hier je Projekt/Prozess/
+            Subprozess manuell gepflegt werden.
+        </p>
+        <form method="POST" action="{{ url_for('ptt.speichern') }}" class="form-row mb-3">
+            <div class="form-field"><label class="field-label" for="ptt_projNr">projNr</label><input type="text" id="ptt_projNr" name="projNr" required></div>
+            <div class="form-field">
+                <label class="field-label" for="ptt_process">process</label>
+                {% if process_subprocess_pairs %}
+                <select id="ptt_process" name="process" required onchange="pttProcessChanged()">
+                    <option value="">– bitte wählen –</option>
+                    {% for p in distinct_processes %}
+                    <option value="{{ p }}">{{ p }}</option>
+                    {% endfor %}
+                </select>
+                {% else %}
+                <input type="text" id="ptt_process" name="process" required>
+                {% endif %}
+            </div>
+            <div class="form-field">
+                <label class="field-label" for="ptt_subProcess">subProcess</label>
+                {% if process_subprocess_pairs %}
+                <select id="ptt_subProcess" name="subProcess" required onchange="pttSubProcessChanged()">
+                    <option value="">– bitte wählen –</option>
+                    {% for s in distinct_subprocesses %}
+                    <option value="{{ s }}">{{ s }}</option>
+                    {% endfor %}
+                </select>
+                {% else %}
+                <input type="text" id="ptt_subProcess" name="subProcess" required>
+                {% endif %}
+            </div>
+            <div class="form-field"><label class="field-label" for="ptt_value">PTT (min)</label><input type="text" id="ptt_value" name="ptt" required></div>
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </form>
+        {% if ptt_manual_ddl %}
+        <div class="content-section" style="margin-bottom:12px;">
+            <div class="content-section-header">Tabelle teCalc_PTT_manual konnte nicht automatisch angelegt werden</div>
+            <div class="content-section-body">
+                <p class="text-sm text-muted mb-2">
+                    Vermutlich fehlt dem Datenbank-Login der App die Berechtigung zum Anlegen von Tabellen
+                    (CREATE TABLE). Diese Anweisung kann ein Datenbank-Administrator einmalig manuell ausführen,
+                    danach funktioniert die automatische Anlage nicht mehr nötig sein:
+                </p>
+                <pre style="background:#F7F7F7; border:1px solid var(--app-border); padding:8px; font-size:10px; overflow-x:auto; white-space:pre;">{{ ptt_manual_ddl }}</pre>
+            </div>
+        </div>
+        {% endif %}
+        {% if db_error %}
+        <p class="text-error">PTT-Einträge konnten nicht geladen werden: {{ db_error }}</p>
+        {% else %}
+        <div class="form-field mb-2" style="max-width:220px;">
+            <label class="field-label" for="pttFilterInput">Filter: Projektnummer</label>
+            <input type="text" id="pttFilterInput" oninput="pttFilterUpdate()" placeholder="z.B. 0067">
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table" id="pttTabelle">
+                <thead>
+                <tr><th>projNr</th><th>process</th><th>subProcess</th><th class="text-center">PTT</th><th>zuletzt geändert</th><th></th></tr>
+                </thead>
+                <tbody>
+                {% for r in ptt_rows %}
+                <tr data-proj="{{ r.projNr }}">
+                    <td class="text-bold text-primary" style="cursor:pointer;" ondblclick="pttBearbeitenPopup('{{ r.projNr }}', '{{ r.process }}', '{{ r.subProcess }}')" title="Doppelklick: PTT-Wert ändern">{{ r.projNr }}</td>
+                    <td>{{ r.process }}</td><td>{{ r.subProcess }}</td>
+                    <td class="num-center">{{ r.ptt|komma(4) }}</td>
+                    <td class="text-sm">{{ r.updated_by }} &ndash; {{ r.updated_at }}</td>
+                    <td>
+                        <button type="button" class="btn btn-sm" onclick="pttBearbeitenPopup('{{ r.projNr }}', '{{ r.process }}', '{{ r.subProcess }}')">Ändern</button>
+                        <form method="POST" action="{{ url_for('ptt.loeschen') }}" onsubmit="return confirm('PTT-Eintrag löschen?')" style="display:inline;">
+                            <input type="hidden" name="projNr" value="{{ r.projNr }}">
+                            <input type="hidden" name="process" value="{{ r.process }}">
+                            <input type="hidden" name="subProcess" value="{{ r.subProcess }}">
+                            <button type="submit" class="btn btn-sm btn-danger">Löschen</button>
+                        </form>
+                    </td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-muted">Noch keine manuellen PTT-Werte gepflegt.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-sm text-muted mt-2">{{ ptt_rows|length }} Eintrag/Einträge.</p>
+        {% endif %}
+    </div>
+</div>
+
+<div id="pttBearbeitenModalContainer"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function pttFilterUpdate() {
+    const filterInput = document.getElementById('pttFilterInput');
+    const filter = (filterInput ? filterInput.value : '').trim().toLowerCase();
+    document.querySelectorAll('#pttTabelle tbody tr[data-proj]').forEach(function (tr) {
+        const projNr = (tr.dataset.proj || '').toLowerCase();
+        tr.classList.toggle('hidden', filter !== '' && !projNr.includes(filter));
+    });
+}
+
+function pttBearbeitenPopup(projNr, process, subProcess) {
+    const params = new URLSearchParams({projNr: projNr, process: process, subProcess: subProcess});
+    fetch('{{ url_for("ptt.bearbeiten_popup") }}?' + params.toString())
+        .then(r => r.text()).then(html => {
+            document.getElementById('pttBearbeitenModalContainer').innerHTML = html;
+        });
+}
+
+function pttSchliesseBearbeitenPopup() {
+    document.getElementById('pttBearbeitenModalContainer').innerHTML = '';
+}
+
+{% if process_subprocess_pairs %}
+const PTT_PROCESS_SUBPROCESS_PAIRS = {{ process_subprocess_pairs|tojson }};
+const PTT_SUBPROCESS_TO_PROCESS = {};
+const PTT_PROCESS_TO_SUBPROCESSES = {};
+PTT_PROCESS_SUBPROCESS_PAIRS.forEach(function (pair) {
+    const proc = pair.process, sub = pair.subProcess;
+    PTT_SUBPROCESS_TO_PROCESS[sub] = proc;
+    if (!PTT_PROCESS_TO_SUBPROCESSES[proc]) PTT_PROCESS_TO_SUBPROCESSES[proc] = [];
+    PTT_PROCESS_TO_SUBPROCESSES[proc].push(sub);
+});
+const PTT_ALLE_SUBPROCESSES = Object.keys(PTT_SUBPROCESS_TO_PROCESS).sort();
+
+function _pttFuelleSubProcessOptionen(erlaubte, behalten) {
+    const subSelect = document.getElementById('ptt_subProcess');
+    if (!subSelect) return;
+    let html = '<option value="">– bitte wählen –</option>';
+    erlaubte.forEach(function (s) {
+        html += '<option value="' + s + '">' + s + '</option>';
+    });
+    subSelect.innerHTML = html;
+    if (behalten && erlaubte.indexOf(behalten) !== -1) {
+        subSelect.value = behalten;
+    }
+}
+
+function pttProcessChanged() {
+    const procSelect = document.getElementById('ptt_process');
+    const subSelect = document.getElementById('ptt_subProcess');
+    if (!procSelect || !subSelect) return;
+    const proc = procSelect.value;
+    const bisherigerSub = subSelect.value;
+    const erlaubte = proc ? (PTT_PROCESS_TO_SUBPROCESSES[proc] || []) : PTT_ALLE_SUBPROCESSES;
+    _pttFuelleSubProcessOptionen(erlaubte, bisherigerSub);
+}
+
+function pttSubProcessChanged() {
+    const subSelect = document.getElementById('ptt_subProcess');
+    const procSelect = document.getElementById('ptt_process');
+    if (!subSelect || !procSelect) return;
+    const sub = subSelect.value;
+    if (sub && PTT_SUBPROCESS_TO_PROCESS[sub] && procSelect.value !== PTT_SUBPROCESS_TO_PROCESS[sub]) {
+        procSelect.value = PTT_SUBPROCESS_TO_PROCESS[sub];
+        pttProcessChanged();
+    }
+}
+{% endif %}
+</script>
+{% endblock %}

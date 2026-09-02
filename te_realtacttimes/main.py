@@ -43,6 +43,25 @@ def _setup_logging():
     root.addHandler(console_handler)
 
 
+def format_komma(value, decimals=None):
+    """Formatiert eine Zahl im deutschen Format (Komma statt Punkt als
+    Dezimaltrennzeichen) - passend zum Format der Quelldaten (CSV/DB: "0,7631").
+
+    decimals=None: Python-Standarddarstellung (repr), nur der Dezimalpunkt
+    wird durch ein Komma ersetzt - für die ungefilterten TactTimes/
+    TactTimesCalc-PopUps (voller, unformatierter Inhalt der Quelltabelle).
+    decimals=N: feste Nachkommastellen (ersetzt vorheriges "%.<N>f"|format(...))
+    für die aufbereiteten Ansichten (TactTimeCheck, Projektdetails, PTT-Pflege).
+
+    Nicht-Gleitkommawerte (Text, Datum, None, int) werden unverändert
+    durchgereicht - dort ist kein Dezimaltrennzeichen vorhanden.
+    """
+    if isinstance(value, float):
+        text = f"{value:.{decimals}f}" if decimals is not None else repr(value)
+        return text.replace(".", ",")
+    return value
+
+
 def create_app():
     app = Flask(
         __name__,
@@ -51,11 +70,14 @@ def create_app():
     )
     app.secret_key = secrets.token_hex(16)
     app.config["UPLOAD_FOLDER"] = config.UPLOAD_FOLDER
+    app.jinja_env.filters["komma"] = format_komma
 
-    from gui.routes import main_bp, bewerten_bp, konfiguration_bp, api_bp
+    from gui.routes import main_bp, bewerten_bp, konfiguration_bp, ptt_bp, infor_bp, api_bp
     app.register_blueprint(main_bp)
     app.register_blueprint(bewerten_bp)
     app.register_blueprint(konfiguration_bp)
+    app.register_blueprint(ptt_bp)
+    app.register_blueprint(infor_bp)
     app.register_blueprint(api_bp)
 
     @app.context_processor

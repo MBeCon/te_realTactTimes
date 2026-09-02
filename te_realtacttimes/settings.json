@@ -1,5 +1,5 @@
 {
-  "active_server": "mbe",
+  "active_server": "demo",
   "thresholds": {
     "warn_lower_pct": -10.0,
     "warn_upper_pct": 10.0,

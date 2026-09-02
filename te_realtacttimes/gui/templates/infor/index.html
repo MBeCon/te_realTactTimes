@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+{% block title %}INFOR-Übernahme – {{ app_name }}{% endblock %}
+{% block content %}
+<div class="page-header">
+    <div>
+        <div class="page-title">INFOR-Übernahme</div>
+        <div class="page-subtitle">Dokumentation aller bisher nach Infor übernommenen Korrekturwerte (board_tactTime_brutto)</div>
+    </div>
+</div>
+
+<div class="content-section">
+    <div class="content-section-header">Übernahmen ins Infor</div>
+    <div class="content-section-body">
+        {% if infor_changes_ddl %}
+        <div class="content-section" style="margin-bottom:12px;">
+            <div class="content-section-header">Tabelle teCalc_COR_INFORchanges konnte nicht automatisch angelegt werden</div>
+            <div class="content-section-body">
+                <p class="text-sm text-muted mb-2">
+                    Vermutlich fehlt dem Datenbank-Login der App die Berechtigung zum Anlegen von Tabellen
+                    (CREATE TABLE). Diese Anweisung kann ein Datenbank-Administrator einmalig manuell ausführen:
+                </p>
+                <pre style="background:#F7F7F7; border:1px solid var(--app-border); padding:8px; font-size:10px; overflow-x:auto; white-space:pre;">{{ infor_changes_ddl }}</pre>
+            </div>
+        </div>
+        {% endif %}
+        {% if db_error %}
+        <p class="text-error">Liste der Infor-Übernahmen konnte nicht geladen werden: {{ db_error }}</p>
+        {% else %}
+        <div class="form-field mb-2" style="max-width:220px;">
+            <label class="field-label" for="inforFilterInput">Filter: Projektnummer</label>
+            <input type="text" id="inforFilterInput" oninput="inforFilterUpdate()" placeholder="z.B. 0067">
+        </div>
+        <div class="table-wrapper">
+            <table class="data-table" id="inforTabelle">
+                <thead>
+                <tr>
+                    <th>Projektnummer</th>
+                    <th>Prozess</th>
+                    <th>Übernahmedatum</th>
+                    <th>Bearbeiter</th>
+                    <th class="text-center">MTT (min)</th>
+                    <th class="text-center">PTT (alt, min)</th>
+                    <th class="text-center">Abw.</th>
+                    <th class="text-center">Abw. %</th>
+                    <th class="text-center">PTT neu (min)</th>
+                    <th>Status</th>
+                </tr>
+                </thead>
+                <tbody>
+                {% for r in rows %}
+                <tr data-proj="{{ r.projNr }}">
+                    <td class="text-bold text-primary">{{ r.projNr }}</td>
+                    <td>{{ r.process }}</td>
+                    <td class="text-sm">{{ r.uebernahmedatum }}</td>
+                    <td>{{ r.bearbeiter }}</td>
+                    <td class="num-center">{{ r.mtt|komma(4) if r.mtt is not none else "–" }}</td>
+                    <td class="num-center">{{ r.ptt|komma(4) if r.ptt is not none else "–" }}</td>
+                    <td class="num-center">{{ r.abweichung|komma(4) if r.abweichung is not none else "–" }}</td>
+                    <td class="num-center">{{ r.abweichung_pct|komma(1) ~ "%" if r.abweichung_pct is not none else "–" }}</td>
+                    <td class="num-center">{{ r.ptt_neu|komma(4) if r.ptt_neu is not none else "–" }}</td>
+                    <td><span class="badge badge-{{ 'success' if r.status != 'offen' else 'warning' }}">{{ r.status }}</span></td>
+                </tr>
+                {% else %}
+                <tr><td colspan="10" class="text-muted">Noch keine Übernahmen ins Infor dokumentiert.</td></tr>
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        <p class="text-sm text-muted mt-2">{{ rows|length }} Übernahme(n). Neueste zuerst.</p>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function inforFilterUpdate() {
+    const filterInput = document.getElementById('inforFilterInput');
+    const filter = (filterInput ? filterInput.value : '').trim().toLowerCase();
+    document.querySelectorAll('#inforTabelle tbody tr[data-proj]').forEach(function (tr) {
+        const projNr = (tr.dataset.proj || '').toLowerCase();
+        tr.classList.toggle('hidden', filter !== '' && !projNr.includes(filter));
+    });
+}
+</script>
+{% endblock %}

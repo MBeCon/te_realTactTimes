@@ -5,12 +5,15 @@
             <span class="modal-close" onclick="schliesseStartseitenPopup()">&#10005;</span>
         </div>
         <div class="modal-body">
+            <div class="content-section-header" style="margin: -12px -12px 10px -12px;">
+                <span>{{ table_name }}</span>
+            </div>
             {% if error %}
             <p class="text-error">Daten konnten nicht geladen werden: {{ error }}</p>
             {% elif not rows %}
             <p class="text-muted">Keine Daten in {{ table_name }} gefunden.</p>
             {% else %}
-            <div class="table-wrapper">
+            <div class="table-wrapper table-wrapper-xy">
                 <table class="data-table">
                     <thead>
                     <tr>
@@ -23,7 +26,7 @@
                     {% for r in rows %}
                     <tr>
                         {% for val in r.values() %}
-                        <td class="{{ 'num' if val is number else '' }}">{{ val if val is not none else "–" }}</td>
+                        <td class="{{ 'num' if val is number else '' }}">{{ val|komma if val is not none else "–" }}</td>
                         {% endfor %}
                     </tr>
                     {% endfor %}

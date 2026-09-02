@@ -4,7 +4,7 @@
 <div class="page-header">
     <div>
         <div class="page-title">Konfiguration</div>
-        <div class="page-subtitle">Grenzwerte, SQL-Server, Webserver, PTT-Pflege, Nutzerrechte</div>
+        <div class="page-subtitle">Grenzwerte, SQL-Server, Webserver, Nutzerrechte</div>
     </div>
 </div>
 
@@ -15,7 +15,6 @@
             <button type="button" class="btn btn-primary" onclick="openModal('modalGrenzwerte')">&#128200; Grenzwerte definieren</button>
             <button type="button" class="btn btn-primary" onclick="openModal('modalServer')">&#128421; SQL-Server konfigurieren</button>
             <button type="button" class="btn btn-primary" onclick="openModal('modalWebserver')">&#127760; Webserver konfigurieren</button>
-            <button type="button" class="btn btn-primary" onclick="openModal('modalPtt')">&#9998; PTT-Pflege (Übergangslösung)</button>
             <form method="GET" action="{{ url_for('konfiguration.nutzerrechte') }}" style="display:inline;">
                 <button type="submit" class="btn">&#128274; Rechte (kommt später)</button>
             </form>
@@ -154,63 +153,6 @@
                 <button type="submit" class="btn btn-primary">Speichern</button>
             </div>
         </form>
-    </div>
-</div>
-
-<!-- ===== Modal: PTT-Pflege (Übergangslösung, bis Leitstand-Anbindung <TBD> steht) ===== -->
-<div class="modal-backdrop hidden" id="modalPtt">
-    <div class="modal-box modal-box-lg">
-        <div class="modal-header">
-            <span>PTT-Pflege (Übergangslösung)</span>
-            <span class="modal-close" onclick="closeModal('modalPtt')">&#10005;</span>
-        </div>
-        <div class="modal-body">
-            <p class="text-sm text-muted mb-2">
-                Die Anbindung der Plan-Taktzeiten (PTT) aus dem Leitstand ist laut Vorgabe
-                noch nicht spezifiziert. Bis dahin können PTT-Werte hier je Projekt/Prozess/
-                Subprozess manuell gepflegt werden.
-            </p>
-            <form method="POST" action="{{ url_for('konfiguration.ptt_speichern') }}" class="form-row mb-3">
-                <div class="form-field"><label class="field-label" for="ptt_projNr">projNr</label><input type="text" id="ptt_projNr" name="projNr" required></div>
-                <div class="form-field"><label class="field-label" for="ptt_process">process</label><input type="text" id="ptt_process" name="process" required></div>
-                <div class="form-field"><label class="field-label" for="ptt_subProcess">subProcess</label><input type="text" id="ptt_subProcess" name="subProcess" required></div>
-                <div class="form-field"><label class="field-label" for="ptt_value">PTT (min)</label><input type="text" id="ptt_value" name="ptt" required></div>
-                <button type="submit" class="btn btn-primary">Speichern</button>
-            </form>
-            {% if db_error %}
-            <p class="text-error">PTT-Einträge konnten nicht geladen werden: {{ db_error }}</p>
-            {% else %}
-            <div class="table-wrapper">
-                <table class="data-table">
-                    <thead>
-                    <tr><th>projNr</th><th>process</th><th>subProcess</th><th class="text-right">PTT</th><th>zuletzt geändert</th><th></th></tr>
-                    </thead>
-                    <tbody>
-                    {% for r in ptt_rows %}
-                    <tr>
-                        <td>{{ r.projNr }}</td><td>{{ r.process }}</td><td>{{ r.subProcess }}</td>
-                        <td class="num">{{ "%.4f"|format(r.ptt) }}</td>
-                        <td class="text-sm">{{ r.updated_by }} &ndash; {{ r.updated_at }}</td>
-                        <td>
-                            <form method="POST" action="{{ url_for('konfiguration.ptt_loeschen') }}" onsubmit="return confirm('PTT-Eintrag löschen?')">
-                                <input type="hidden" name="projNr" value="{{ r.projNr }}">
-                                <input type="hidden" name="process" value="{{ r.process }}">
-                                <input type="hidden" name="subProcess" value="{{ r.subProcess }}">
-                                <button type="submit" class="btn btn-sm btn-danger">Löschen</button>
-                            </form>
-                        </td>
-                    </tr>
-                    {% else %}
-                    <tr><td colspan="6" class="text-muted">Noch keine manuellen PTT-Werte gepflegt.</td></tr>
-                    {% endfor %}
-                    </tbody>
-                </table>
-            </div>
-            {% endif %}
-        </div>
-        <div class="modal-footer">
-            <button type="button" class="btn" onclick="closeModal('modalPtt')">Schließen</button>
-        </div>
     </div>
 </div>
 {% endblock %}

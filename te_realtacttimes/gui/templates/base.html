@@ -52,6 +52,14 @@
                    class="{% if request.endpoint and request.endpoint.startswith('konfiguration.') %}active{% endif %} sidebar-text">
                     &#9881; Konfiguration
                 </a>
+                <a href="{{ url_for('ptt.index') }}"
+                   class="{% if request.endpoint and request.endpoint.startswith('ptt.') %}active{% endif %} sidebar-text">
+                    &#9998; manuelle PTT Eingabe
+                </a>
+                <a href="{{ url_for('infor.index') }}"
+                   class="{% if request.endpoint and request.endpoint.startswith('infor.') %}active{% endif %} sidebar-text">
+                    &#128228; INFOR-Übernahme
+                </a>
                 <a href="#" onclick="alert('KPIs sind laut Vorgabe noch nicht implementiert (kommt später).'); return false;"
                    class="disabled sidebar-text" title="kommt später">
                     &#128200; KPIs

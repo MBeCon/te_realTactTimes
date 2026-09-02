@@ -29,6 +29,8 @@ logger = logging.getLogger(__name__)
 main_bp = Blueprint("main", __name__)
 bewerten_bp = Blueprint("bewerten", __name__, url_prefix="/bewerten")
 konfiguration_bp = Blueprint("konfiguration", __name__, url_prefix="/konfiguration")
+ptt_bp = Blueprint("ptt", __name__, url_prefix="/ptt")
+infor_bp = Blueprint("infor", __name__, url_prefix="/infor")
 api_bp = Blueprint("api", __name__, url_prefix="/api")
 
 
@@ -75,6 +77,48 @@ def _get_ptt_map(proj_nr=None):
             )
             g._ptt_warning_flashed = True
         return {}
+
+
+def _get_stale_projekte():
+    """Projekte, deren letzte Infor-Übernahme älter ist als die neueste
+
+    Fertigungszeit in MAR_TactTimesCalc (siehe database.get_infor_lag_projects).
+    Robust gegenüber (noch) fehlender teCalc_COR_INFORchanges-Tabelle - liefert
+    dann einfach eine leere Markierung statt die Seite abstürzen zu lassen.
+
+    Rückgabe: (stale_projekte: set, infor_changes_ddl: str|None). Letzteres ist
+    gesetzt, wenn die Tabelle teCalc_COR_INFORchanges nicht automatisch angelegt
+    werden konnte (z.B. mangels Berechtigung) - enthält dann die fertige
+    CREATE TABLE-Anweisung, damit ein Admin sie manuell ausführen kann.
+    """
+    infor_changes_ddl = None
+    try:
+        tabellen_fehler = database.ensure_app_tables()
+    except Exception:  # noqa: BLE001
+        logger.exception("Konnte App-Tabellen (u.a. teCalc_COR_INFORchanges) nicht anlegen")
+        tabellen_fehler = {}
+    if "infor_changes" in tabellen_fehler:
+        flash(
+            f"Tabelle teCalc_COR_INFORchanges konnte nicht automatisch angelegt "
+            f"werden: {tabellen_fehler['infor_changes']}",
+            "warning",
+        )
+        try:
+            infor_changes_ddl = database.get_ddl_for_table("infor_changes")
+        except Exception:  # noqa: BLE001
+            logger.exception("DDL für teCalc_COR_INFORchanges konnte nicht ermittelt werden")
+    try:
+        return database.get_infor_lag_projects(), infor_changes_ddl
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Infor-Übernahme-Status konnte nicht ermittelt werden")
+        if not getattr(g, "_infor_lag_warning_flashed", False):
+            flash(
+                f"Status der Infor-Übernahme konnte nicht ermittelt werden – "
+                f"Projekte-Liste zeigt daher keine Veraltet-Markierung: {exc}",
+                "warning",
+            )
+            g._infor_lag_warning_flashed = True
+        return set(), infor_changes_ddl
 
 
 # =============================================================================
@@ -168,6 +212,31 @@ def index():
     ran = request.args.get("ran") == "1"
     selected_proj = request.args.get("selected_proj", "").strip() or None
 
+    # ===== Projekte-Liste (Checkbox-Auswahl links neben TactTimeCheck) =====
+    # Solange proj_filter_active nicht gesetzt ist (frischer Seitenaufruf, noch
+    # keine Auswahl getroffen), gelten alle Projekte als ausgewählt (kein
+    # Regressionsverhalten ggü. vorher). Sobald das Projekte-Formular einmal
+    # abgeschickt wurde, ist proj_filter_active=1 gesetzt und die tatsächlich
+    # angehakten Projekte (auch: keines) sind maßgeblich.
+    projekte_error = None
+    try:
+        alle_projekte = database.get_mtt_calc_projects()
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("Projektliste konnte nicht geladen werden")
+        alle_projekte = []
+        projekte_error = str(exc)
+
+    stale_projekte, infor_changes_ddl = _get_stale_projekte()
+
+    # Projekte-Liste: Projekte mit veralteter Infor-Uebernahme zuerst listen
+    # (stabile Sortierung - behaelt die bisherige alphabetische Reihenfolge
+    # innerhalb jeder der beiden Gruppen bei, siehe database.get_mtt_calc_projects()).
+    alle_projekte = sorted(alle_projekte, key=lambda p: 0 if p in stale_projekte else 1)
+
+    proj_filter_active = request.args.get("proj_filter_active") == "1"
+    ausgewaehlte_projekte = request.args.getlist("proj") if proj_filter_active else list(alle_projekte)
+    ausgewaehlte_projekte_set = set(ausgewaehlte_projekte)
+
     rows = []
     error = None
     if ran:
@@ -179,6 +248,14 @@ def index():
                     [f"%{lot_filter}%"],
                 )
                 proj_nr_list = [r["projNr"] for r in lot_rows]
+
+            if proj_filter_active:
+                # Schnittmenge mit der Los-Filterung (falls beides gesetzt ist);
+                # sonst ist die Checkbox-Auswahl allein maßgeblich.
+                if proj_nr_list is not None:
+                    proj_nr_list = [p for p in proj_nr_list if p in ausgewaehlte_projekte_set]
+                else:
+                    proj_nr_list = list(ausgewaehlte_projekte_set)
 
             mtt_rows = database.get_mtt_calc()
             ptt_map = _get_ptt_map()
@@ -194,9 +271,12 @@ def index():
             error = str(exc)
             flash(f"TTCheck fehlgeschlagen: {exc}", "error")
 
-    projektdetails = None
-    if selected_proj:
-        projektdetails = _load_projektdetails(selected_proj, request.args.get("proc_filter", "").strip() or None)
+    # Projektdetails werden nicht mehr serverseitig inline gerendert, sondern
+    # als PopUp per AJAX nachgeladen (siehe bewerten.projekt_popup). Ist
+    # selected_proj gesetzt (z.B. nach einer Infor-Übernahme, die zurück auf
+    # das gerade bearbeitete Projekt verlinkt), öffnet das Template das PopUp
+    # beim Laden automatisch mit demselben proc_filter.
+    proc_filter = request.args.get("proc_filter", "").strip() or None
 
     return render_template(
         "bewerten/index.html",
@@ -206,8 +286,15 @@ def index():
         lot_filter=lot_filter, status_filter=status_filter,
         status_labels=config.STATUS_LABELS,
         selected_proj=selected_proj,
-        projektdetails=projektdetails,
+        proc_filter=proc_filter,
         thresholds=settings.get_thresholds(),
+        alle_projekte=alle_projekte,
+        ausgewaehlte_projekte=ausgewaehlte_projekte,
+        ausgewaehlte_projekte_set=ausgewaehlte_projekte_set,
+        proj_filter_active=proj_filter_active,
+        projekte_error=projekte_error,
+        stale_projekte=stale_projekte,
+        infor_changes_ddl=infor_changes_ddl,
     )
 
 
@@ -218,6 +305,15 @@ def ttcheck():
         ptt_map = _get_ptt_map()
         thresholds = settings.get_thresholds()
         proc_rows = bewertung.compute_process_level(mtt_rows, ptt_map, thresholds)
+
+        # Nur die in der Projekte-Liste angehakten Projekte werden betrachtet
+        # (das Projekte-Formular schickt proj_filter_active=1 immer mit, auch
+        # wenn keine einzige Checkbox angehakt ist - dann werden bewusst keine
+        # Zeilen berücksichtigt/gespeichert).
+        if request.form.get("proj_filter_active") == "1":
+            ausgewaehlte_projekte = request.form.getlist("proj")
+            proc_rows = bewertung.filter_process_rows(proc_rows, proj_nr_list=ausgewaehlte_projekte)
+
         count = dokumentation.record_ttcheck_run(proc_rows, _current_user())
         flash(f"TTCheck ausgeführt und dokumentiert ({count} Zeilen).", "success")
     except Exception as exc:  # noqa: BLE001
@@ -232,6 +328,10 @@ def _keep_args():
         val = request.args.get(key) or request.form.get(key)
         if val:
             keep[key] = val
+    if (request.args.get("proj_filter_active") or request.form.get("proj_filter_active")) == "1":
+        projekte = request.form.getlist("proj") or request.args.getlist("proj")
+        keep["proj_filter_active"] = "1"
+        keep["proj"] = projekte
     return keep
 
 
@@ -267,6 +367,19 @@ def projekt_partial(proj_nr):
     proc_filter = request.args.get("proc_filter", "").strip() or None
     details = _load_projektdetails(proj_nr, proc_filter)
     return render_template("bewerten/_projektdetails.html", d=details, status_labels=config.STATUS_LABELS)
+
+
+@bewerten_bp.route("/projekt/<proj_nr>/popup")
+def projekt_popup(proj_nr):
+    """Projektdetails als PopUp (Klick auf eine TactTimeCheck-Zeile).
+
+    Die Uebernahme-nach-Infor-Ansicht (Uebernehmen-Checkboxen + Korrektur-
+    Spalten) wird immer direkt angezeigt - kein gesonderter Zwischenschritt
+    mehr noetig.
+    """
+    proc_filter = request.args.get("proc_filter", "").strip() or None
+    details = _load_projektdetails(proj_nr, proc_filter)
+    return render_template("bewerten/_projektdetails_popup.html", d=details, status_labels=config.STATUS_LABELS)
 
 
 @bewerten_bp.route("/prozess/<proj_nr>/<process>")
@@ -323,22 +436,6 @@ def infor_uebernehmen():
 
 @konfiguration_bp.route("/")
 def index():
-    ptt_rows = []
-    db_error = None
-    if _active_server_ok():
-        try:
-            # Selbstheilung: Falls die App-Tabellen (u.a. teCalc_PTT_manual) auf dem
-            # aktiven Server noch fehlen oder bei einem früheren Verbinden nicht
-            # angelegt werden konnten, hier erneut versuchen.
-            database.ensure_app_tables()
-        except Exception:  # noqa: BLE001
-            logger.exception("Konnte App-Tabellen beim Aufruf der Konfigurationsseite nicht anlegen")
-        try:
-            ptt_rows = database.get_ptt_rows()
-        except Exception as exc:  # noqa: BLE001
-            logger.exception("PTT-Einträge konnten nicht geladen werden")
-            db_error = str(exc)
-
     return render_template(
         "konfiguration/index.html",
         servers=config.DB_SERVERS,
@@ -346,8 +443,6 @@ def index():
         thresholds=settings.get_thresholds(),
         current_user=settings.get_current_user(),
         webserver=settings.get("webserver"),
-        ptt_rows=ptt_rows,
-        db_error=db_error,
     )
 
 
@@ -415,39 +510,190 @@ def bearbeiter_speichern():
     return redirect(url_for("konfiguration.index"))
 
 
-@konfiguration_bp.route("/ptt/speichern", methods=["POST"])
-def ptt_speichern():
+@konfiguration_bp.route("/nutzerrechte")
+def nutzerrechte():
+    flash("Nutzerrechte-Verwaltung ist noch nicht implementiert (siehe Prompt: kommt erst später).", "info")
+    return redirect(url_for("konfiguration.index"))
+
+
+# =============================================================================
+# ===== ptt_bp – manuelle PTT-Eingabe (Übergangslösung) =====
+# =============================================================================
+# Eigene Seite (eigener Menüpunkt in der linken Navigation), vorher ein Modal
+# auf der Konfigurationsseite. Solange die echte Leitstand-Anbindung <TBD>
+# ist, werden Plan-Taktzeiten hier manuell je projNr/process/subProcess in
+# teCalc_PTT_manual gepflegt.
+
+@ptt_bp.route("/")
+def index():
+    ptt_rows = []
+    db_error = None
+    ptt_manual_ddl = None
+    if _active_server_ok():
+        try:
+            # Selbstheilung: Falls die App-Tabellen (u.a. teCalc_PTT_manual) auf dem
+            # aktiven Server noch fehlen, hier erneut versuchen anzulegen. Jede
+            # Tabelle wird von ensure_app_tables() einzeln angelegt - ein Fehler bei
+            # einer anderen App-Tabelle (z.B. teCalc_COR_tactTimesCheck) blockiert
+            # also nicht mehr das Anlegen von teCalc_PTT_manual.
+            tabellen_fehler = database.ensure_app_tables()
+        except Exception:  # noqa: BLE001
+            logger.exception("Konnte App-Tabellen beim Aufruf der PTT-Eingabe nicht anlegen")
+            tabellen_fehler = {}
+        if "ptt_manual" in tabellen_fehler:
+            # Konnte die Tabelle nicht automatisch angelegt werden (z.B. mangels
+            # CREATE TABLE-Berechtigung auf dem Server), die konkrete Ursache
+            # anzeigen + die DDL, damit sie ein Admin manuell ausführen kann.
+            flash(
+                f"Tabelle teCalc_PTT_manual konnte nicht automatisch angelegt "
+                f"werden: {tabellen_fehler['ptt_manual']}",
+                "warning",
+            )
+            try:
+                ptt_manual_ddl = database.get_ddl_for_table("ptt_manual")
+            except Exception:  # noqa: BLE001
+                logger.exception("DDL für teCalc_PTT_manual konnte nicht ermittelt werden")
+        try:
+            ptt_rows = database.get_ptt_rows()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("PTT-Einträge konnten nicht geladen werden")
+            db_error = str(exc)
+
+    # process/subProcess als Kombinationsfelder (Auswahlliste statt Freitext),
+    # Werte distinct aus MAR_TactTimes; bei Fehler Fallback auf Freitext-Inputs
+    # (siehe ptt/index.html), damit die Seite trotzdem nutzbar bleibt.
+    process_subprocess_pairs = []
+    if _active_server_ok():
+        try:
+            process_subprocess_pairs = database.get_process_subprocess_pairs()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("process/subProcess-Auswahllisten (MAR_TactTimes) konnten nicht geladen werden")
+            flash(
+                f"process/subProcess-Auswahllisten konnten nicht geladen werden – "
+                f"es wird Freitext-Eingabe verwendet: {exc}",
+                "warning",
+            )
+
+    distinct_processes = sorted({r["process"] for r in process_subprocess_pairs})
+    distinct_subprocesses = sorted({r["subProcess"] for r in process_subprocess_pairs})
+
+    return render_template(
+        "ptt/index.html", ptt_rows=ptt_rows, db_error=db_error,
+        ptt_manual_ddl=ptt_manual_ddl,
+        process_subprocess_pairs=process_subprocess_pairs,
+        distinct_processes=distinct_processes,
+        distinct_subprocesses=distinct_subprocesses,
+    )
+
+
+@ptt_bp.route("/bearbeiten")
+def bearbeiten_popup():
+    """PopUp zum Aendern eines bestehenden PTT-Eintrags (Doppelklick auf die
+    Projektnummer in der PTT-Pflege-Liste, oder der Button "Aendern" davor).
+    Das Formular im PopUp postet an die bestehende ptt.speichern-Route, die
+    ueber database.upsert_ptt() bereits Update-then-Insert beherrscht - fuer
+    einen bestehenden (projNr, process, subProcess)-Schluessel wird also
+    einfach der PTT-Wert aktualisiert, kein neuer Code fuer den Schreibweg
+    noetig.
+    """
+    proj_nr = request.args.get("projNr", "").strip()
+    process = request.args.get("process", "").strip()
+    sub_process = request.args.get("subProcess", "").strip()
+    row = None
+    error = None
+    if proj_nr and process and sub_process:
+        try:
+            rows = database.get_ptt_rows(proj_nr)
+            row = next(
+                (r for r in rows if r["process"] == process and r["subProcess"] == sub_process),
+                None,
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("PTT-Eintrag zum Bearbeiten konnte nicht geladen werden")
+            error = str(exc)
+    return render_template("ptt/_bearbeiten_popup.html", row=row, error=error)
+
+
+@ptt_bp.route("/speichern", methods=["POST"])
+def speichern():
     proj_nr = request.form.get("projNr", "").strip()
     process = request.form.get("process", "").strip()
     sub_process = request.form.get("subProcess", "").strip()
     ptt_raw = request.form.get("ptt", "").strip().replace(",", ".")
     if not (proj_nr and process and sub_process and ptt_raw):
         flash("Bitte projNr, process, subProcess und PTT ausfüllen.", "error")
-        return redirect(url_for("konfiguration.index"))
+        return redirect(url_for("ptt.index"))
     try:
         ptt = float(ptt_raw)
     except ValueError:
         flash("PTT muss eine Zahl sein.", "error")
-        return redirect(url_for("konfiguration.index"))
-    database.upsert_ptt(proj_nr, process, sub_process, ptt, _current_user())
+        return redirect(url_for("ptt.index"))
+    try:
+        database.ensure_app_tables()
+    except Exception:  # noqa: BLE001
+        logger.exception("Konnte App-Tabellen beim Speichern der PTT nicht anlegen")
+    try:
+        database.upsert_ptt(proj_nr, process, sub_process, ptt, _current_user())
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("PTT konnte nicht gespeichert werden")
+        flash(f"PTT konnte nicht gespeichert werden: {exc}", "error")
+        return redirect(url_for("ptt.index"))
     flash("PTT gespeichert.", "success")
-    return redirect(url_for("konfiguration.index"))
+    return redirect(url_for("ptt.index"))
 
 
-@konfiguration_bp.route("/ptt/loeschen", methods=["POST"])
-def ptt_loeschen():
+@ptt_bp.route("/loeschen", methods=["POST"])
+def loeschen():
     proj_nr = request.form.get("projNr", "")
     process = request.form.get("process", "")
     sub_process = request.form.get("subProcess", "")
-    database.delete_ptt(proj_nr, process, sub_process)
+    try:
+        database.delete_ptt(proj_nr, process, sub_process)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("PTT-Eintrag konnte nicht gelöscht werden")
+        flash(f"PTT-Eintrag konnte nicht gelöscht werden: {exc}", "error")
+        return redirect(url_for("ptt.index"))
     flash("PTT-Eintrag gelöscht.", "success")
-    return redirect(url_for("konfiguration.index"))
+    return redirect(url_for("ptt.index"))
 
 
-@konfiguration_bp.route("/nutzerrechte")
-def nutzerrechte():
-    flash("Nutzerrechte-Verwaltung ist noch nicht implementiert (siehe Prompt: kommt erst später).", "info")
-    return redirect(url_for("konfiguration.index"))
+# =============================================================================
+# ===== infor_bp – Liste der Uebernahmen ins Infor =====
+# =============================================================================
+# Zeigt teCalc_COR_INFORchanges (wird von bewerten.infor_uebernehmen() ueber
+# dokumentation.record_infor_transfer()/database.save_infor_change_rows()
+# befuellt) als eigene, dedizierte Liste - vorher nur indirekt sichtbar (z.B.
+# als Grundlage der "veraltet"-Markierung in der Bewerten-Projekte-Liste).
+
+@infor_bp.route("/")
+def index():
+    rows = []
+    db_error = None
+    infor_changes_ddl = None
+    if _active_server_ok():
+        try:
+            tabellen_fehler = database.ensure_app_tables()
+        except Exception:  # noqa: BLE001
+            logger.exception("Konnte App-Tabellen beim Aufruf der INFOR-Übernahme-Liste nicht anlegen")
+            tabellen_fehler = {}
+        if "infor_changes" in tabellen_fehler:
+            flash(
+                f"Tabelle teCalc_COR_INFORchanges konnte nicht automatisch angelegt "
+                f"werden: {tabellen_fehler['infor_changes']}",
+                "warning",
+            )
+            try:
+                infor_changes_ddl = database.get_ddl_for_table("infor_changes")
+            except Exception:  # noqa: BLE001
+                logger.exception("DDL für teCalc_COR_INFORchanges konnte nicht ermittelt werden")
+        try:
+            rows = dokumentation.get_infor_changes()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Liste der Infor-Übernahmen konnte nicht geladen werden")
+            db_error = str(exc)
+    return render_template(
+        "infor/index.html", rows=rows, db_error=db_error, infor_changes_ddl=infor_changes_ddl,
+    )
 
 
 # =============================================================================

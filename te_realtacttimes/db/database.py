@@ -17,6 +17,7 @@ von SQL Server als auch von SQLite verstanden wird - dadurch kann derselbe
 SQL-Text für beide Treiber verwendet werden.
 """
 
+import datetime
 import logging
 import sqlite3
 from contextlib import contextmanager
@@ -152,6 +153,20 @@ def _table_name(key, driver):
     return name
 
 
+def _qtable(table):
+    """Bracket-quotet einen (ggf. schema-qualifizierten) Tabellennamen sicher fuer SQL.
+
+    `table` ist z.B. "teCalc_PTT_manual" (sqlite) oder "dbo.teCalc_PTT_manual"
+    (mssql, siehe _table_name()). [dbo.teCalc_PTT_manual] als EIN
+    zusammenhaengender Bracket-Ausdruck ist auf SQL Server UNGUELTIG - das wird
+    als eine Tabelle interpretiert, deren Name woertlich den Punkt enthaelt,
+    und schlaegt mit "Ungueltiger Objektname" fehl. Schema und Tabellenname
+    muessen stattdessen getrennt geklammert werden: [dbo].[teCalc_PTT_manual].
+    Ohne Punkt (sqlite) liefert das schlicht [table] wie zuvor.
+    """
+    return ".".join(f"[{part}]" for part in table.split("."))
+
+
 _DDL = {
     "tact_time_check": {
         "mssql": """
@@ -246,16 +261,83 @@ _DDL = {
 }
 
 
+def _table_exists(conn, driver, table):
+    """Prüft direkt über die (bereits offene) Verbindung, ob eine Tabelle existiert.
+
+    Wird nach einem CREATE TABLE zur Verifikation genutzt: manche Server-
+    Konfigurationen (z.B. ein DDL-Trigger, der die Anlage protokolliert und
+    dabei zurückrollt, oder eine abweichende Standard-Datenbank/Schema pro
+    Verbindung) können ein CREATE TABLE ohne Fehlermeldung durchlaufen lassen,
+    ohne dass die Tabelle danach tatsächlich auffindbar ist - ohne diese
+    Verifikation würde ensure_app_tables() das fälschlich als Erfolg werten.
+    """
+    cur = conn.cursor()
+    if driver == "mssql":
+        cur.execute(
+            "SELECT 1 FROM sys.objects WHERE object_id = OBJECT_ID(?) AND type = N'U'",
+            [table],
+        )
+    else:  # sqlite
+        bare = table.split(".", 1)[1] if table.lower().startswith("dbo.") else table
+        cur.execute("SELECT 1 FROM sqlite_master WHERE type='table' AND name = ?", [bare])
+    return cur.fetchone() is not None
+
+
 def ensure_app_tables(server_key=None):
-    """Legt die von der App verwalteten Tabellen an, falls sie noch nicht existieren."""
+    """Legt die von der App verwalteten Tabellen an, falls sie noch nicht existieren.
+
+    Jede Tabelle wird in einer eigenen Transaktion angelegt (statt vorher: eine
+    gemeinsame Transaktion für alle App-Tabellen). Grund: schlug früher die DDL
+    für eine Tabelle fehl (z.B. fehlende CREATE TABLE-Berechtigung nur für
+    dbo.teCalc_COR_tactTimesCheck), wurden dadurch auch bereits erfolgreich
+    angelegte Tabellen in derselben Transaktion wieder zurückgerollt (u.a.
+    dbo.teCalc_PTT_manual) - ein einzelner Fehler blockierte so sämtliche
+    App-Tabellen, nicht nur die betroffene.
+
+    Nach jedem CREATE TABLE wird zusätzlich per _table_exists() verifiziert,
+    dass die Tabelle danach wirklich existiert (siehe dortige Erklärung) -
+    läuft die DDL ohne Exception durch, die Tabelle ist aber trotzdem nicht
+    auffindbar, wird das jetzt ebenfalls als Fehler gemeldet statt als Erfolg.
+
+    Rückgabe: dict {table_key: Fehlermeldung} für alle Tabellen, deren Anlage
+    fehlgeschlagen ist (leer = alle angelegt/bereits vorhanden). Der Aufrufer
+    kann damit gezielt melden, welche Tabelle fehlt und warum - statt nur
+    einer generischen Meldung.
+    """
     server_key, profile = get_server_profile(server_key)
     driver = profile["driver"]
-    with db_connection(server_key) as (conn, _driver):
-        cur = conn.cursor()
-        for key, ddl_by_driver in _DDL.items():
-            table = _table_name(key, driver)
-            ddl = ddl_by_driver[driver].format(table=table)
-            cur.execute(ddl)
+    fehler = {}
+    for key, ddl_by_driver in _DDL.items():
+        table = _table_name(key, driver)
+        ddl = ddl_by_driver[driver].format(table=table)
+        try:
+            with db_connection(server_key) as (conn, _driver):
+                conn.cursor().execute(ddl)
+                if not _table_exists(conn, driver, table):
+                    raise RuntimeError(
+                        f"CREATE TABLE für {table} lief ohne Fehlermeldung durch, "
+                        f"die Tabelle ist danach aber trotzdem nicht auffindbar "
+                        f"(sys.objects bzw. sqlite_master) - möglicherweise eine "
+                        f"abweichende Datenbank/Schema-Berechtigung oder ein "
+                        f"serverseitiger DDL-Trigger, der die Anlage verhindert."
+                    )
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("Konnte App-Tabelle %s (%s) nicht anlegen", key, table)
+            fehler[key] = str(exc)
+    return fehler
+
+
+def get_ddl_for_table(key, server_key=None):
+    """Liefert die rohe CREATE-TABLE-Anweisung für eine App-Tabelle (key aus
+
+    _DDL, z.B. 'ptt_manual') im Dialekt des aktiven/angegebenen Servers - zum
+    Anzeigen, falls die automatische Anlage fehlschlägt (z.B. mangels
+    Berechtigung), damit ein Admin sie manuell ausführen kann.
+    """
+    _, profile = get_server_profile(server_key)
+    driver = profile["driver"]
+    table = _table_name(key, driver)
+    return _DDL[key][driver].format(table=table).strip()
 
 
 # =============================================================================
@@ -323,6 +405,81 @@ def get_mtt_detail_alle(server_key=None):
     return execute_query(sql, server_key=server_key)
 
 
+def get_process_subprocess_pairs(server_key=None):
+    """Distinct (process, subProcess)-Paare aus MAR_TactTimes.
+
+    Für Auswahllisten mit Kaskadierung (z.B. PTT-Pflege: Kombinationsfelder
+    process/subProcess) - lt. Datenmodell hat jeder subProcess genau einen
+    zugehörigen process, ein process kann aber mehrere subProcesse haben.
+    """
+    sql = (
+        f"SELECT DISTINCT [process], [subProcess] "
+        f"FROM [{config.SOURCE_TABLES['mtt_detail']}] "
+        f"WHERE [process] IS NOT NULL AND [subProcess] IS NOT NULL "
+        f"ORDER BY [process], [subProcess]"
+    )
+    return execute_query(sql, server_key=server_key)
+
+
+def _parse_date_loose(value):
+    """Wandelt einen DB-Wert (date/datetime-Objekt oder Text) in ein reines
+    datetime.date um - unabhängig davon, ob die Quelle (SQLite-Text oder
+    MSSQL date/datetime) Uhrzeit mitliefert. Liefert None bei leerem/
+    unlesbarem Wert.
+    """
+    if value is None:
+        return None
+    if isinstance(value, datetime.datetime):
+        return value.date()
+    if isinstance(value, datetime.date):
+        return value
+    s = str(value).strip()
+    if len(s) < 10:
+        return None
+    try:
+        return datetime.date.fromisoformat(s[:10])
+    except ValueError:
+        return None
+
+
+def get_infor_lag_projects(server_key=None):
+    """Projekte, deren letzte Infor-Übernahme (teCalc_COR_INFORchanges.
+
+    uebernahmedatum) älter ist als die neueste Fertigungszeit in
+    MAR_TactTimesCalc.manufacturingTime - oder für die es noch nie eine
+    Infor-Übernahme gab, obwohl bereits Fertigungsdaten vorliegen.
+
+    Rückgabe: set der betroffenen projNr (für die Markierung in der
+    Projekte-Liste auf der Bewerten-Seite).
+    """
+    mtt_sql = (
+        f"SELECT [projNr], MAX([manufacturingTime]) AS letzte_fertigung "
+        f"FROM [{config.SOURCE_TABLES['mtt_calc']}] GROUP BY [projNr]"
+    )
+    mtt_rows = execute_query(mtt_sql, server_key=server_key)
+
+    _, profile = get_server_profile(server_key)
+    infor_table = _table_name("infor_changes", profile["driver"])
+    infor_sql = (
+        f"SELECT [projNr], MAX([uebernahmedatum]) AS letzte_uebernahme "
+        f"FROM {_qtable(infor_table)} GROUP BY [projNr]"
+    )
+    infor_rows = execute_query(infor_sql, server_key=server_key)
+    infor_map = {
+        r["projNr"]: _parse_date_loose(r["letzte_uebernahme"]) for r in infor_rows
+    }
+
+    stale = set()
+    for r in mtt_rows:
+        letzte_fertigung = _parse_date_loose(r["letzte_fertigung"])
+        if letzte_fertigung is None:
+            continue
+        letzte_uebernahme = infor_map.get(r["projNr"])
+        if letzte_uebernahme is None or letzte_uebernahme < letzte_fertigung:
+            stale.add(r["projNr"])
+    return stale
+
+
 # =============================================================================
 # ===== PTT (Soll-Daten) – Übergangslösung teCalc_PTT_manual =====
 # =============================================================================
@@ -335,7 +492,7 @@ def get_ptt_map(proj_nr=None, server_key=None):
     """Liefert PTT-Werte als dict {(projNr, process, subProcess): ptt}."""
     _, profile = get_server_profile(server_key)
     table = _table_name("ptt_manual", profile["driver"])
-    sql = f"SELECT [projNr], [process], [subProcess], [ptt] FROM [{table}]"
+    sql = f"SELECT [projNr], [process], [subProcess], [ptt] FROM {_qtable(table)}"
     params = []
     if proj_nr:
         sql += " WHERE [projNr] = ?"
@@ -348,7 +505,7 @@ def get_ptt_rows(proj_nr=None, server_key=None):
     """PTT-Einträge als Liste (für die PTT-Pflege-Seite)."""
     _, profile = get_server_profile(server_key)
     table = _table_name("ptt_manual", profile["driver"])
-    sql = f"SELECT [projNr], [process], [subProcess], [ptt], [updated_by], [updated_at] FROM [{table}]"
+    sql = f"SELECT [projNr], [process], [subProcess], [ptt], [updated_by], [updated_at] FROM {_qtable(table)}"
     params = []
     if proj_nr:
         sql += " WHERE [projNr] = ?"
@@ -363,7 +520,7 @@ def upsert_ptt(proj_nr, process, sub_process, ptt, user, server_key=None):
     table = _table_name("ptt_manual", profile["driver"])
     now = _now_str()
     upd_sql = (
-        f"UPDATE [{table}] SET [ptt] = ?, [updated_by] = ?, [updated_at] = ? "
+        f"UPDATE {_qtable(table)} SET [ptt] = ?, [updated_by] = ?, [updated_at] = ? "
         f"WHERE [projNr] = ? AND [process] = ? AND [subProcess] = ?"
     )
     rowcount = execute_write(
@@ -371,7 +528,7 @@ def upsert_ptt(proj_nr, process, sub_process, ptt, user, server_key=None):
     )
     if rowcount == 0:
         ins_sql = (
-            f"INSERT INTO [{table}] ([projNr], [process], [subProcess], [ptt], [updated_by], [updated_at]) "
+            f"INSERT INTO {_qtable(table)} ([projNr], [process], [subProcess], [ptt], [updated_by], [updated_at]) "
             f"VALUES (?, ?, ?, ?, ?, ?)"
         )
         execute_write(
@@ -382,7 +539,7 @@ def upsert_ptt(proj_nr, process, sub_process, ptt, user, server_key=None):
 def delete_ptt(proj_nr, process, sub_process, server_key=None):
     _, profile = get_server_profile(server_key)
     table = _table_name("ptt_manual", profile["driver"])
-    sql = f"DELETE FROM [{table}] WHERE [projNr] = ? AND [process] = ? AND [subProcess] = ?"
+    sql = f"DELETE FROM {_qtable(table)} WHERE [projNr] = ? AND [process] = ? AND [subProcess] = ?"
     execute_write(sql, [proj_nr, process, sub_process], server_key=server_key)
 
 
@@ -401,7 +558,7 @@ def save_tact_time_check_rows(rows, bearbeiter, server_key=None):
     table = _table_name("tact_time_check", profile["driver"])
     now = _now_str()
     sql = (
-        f"INSERT INTO [{table}] "
+        f"INSERT INTO {_qtable(table)} "
         f"([projNr], [bewertungsdatum], [bearbeiter], [process], [mtt], [ptt], [abweichung], [abweichung_pct], [status]) "
         f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
     )
@@ -421,7 +578,7 @@ def save_infor_change_rows(rows, bearbeiter, server_key=None):
     table = _table_name("infor_changes", profile["driver"])
     now = _now_str()
     sql = (
-        f"INSERT INTO [{table}] "
+        f"INSERT INTO {_qtable(table)} "
         f"([projNr], [uebernahmedatum], [bearbeiter], [process], [mtt], [ptt], [abweichung], [abweichung_pct], [ptt_neu], [status]) "
         f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offen')"
     )
@@ -438,7 +595,7 @@ def save_infor_change_rows(rows, bearbeiter, server_key=None):
 def get_tact_time_check_history(proj_nr=None, server_key=None):
     _, profile = get_server_profile(server_key)
     table = _table_name("tact_time_check", profile["driver"])
-    sql = f"SELECT * FROM [{table}]"
+    sql = f"SELECT * FROM {_qtable(table)}"
     params = []
     if proj_nr:
         sql += " WHERE [projNr] = ?"
@@ -450,7 +607,7 @@ def get_tact_time_check_history(proj_nr=None, server_key=None):
 def get_infor_changes(proj_nr=None, server_key=None):
     _, profile = get_server_profile(server_key)
     table = _table_name("infor_changes", profile["driver"])
-    sql = f"SELECT * FROM [{table}]"
+    sql = f"SELECT * FROM {_qtable(table)}"
     params = []
     if proj_nr:
         sql += " WHERE [projNr] = ?"
