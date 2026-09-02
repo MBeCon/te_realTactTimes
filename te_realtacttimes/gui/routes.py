@@ -14,7 +14,7 @@ import os
 import threading
 
 from flask import (
-    Blueprint, flash, jsonify, redirect, render_template,
+    Blueprint, flash, g, jsonify, redirect, render_template,
     request, url_for,
 )
 
@@ -48,6 +48,33 @@ def _active_server_ok():
         return True
     except Exception:  # noqa: BLE001
         return False
+
+
+def _get_ptt_map(proj_nr=None):
+    """Lädt die PTT-Map, robust gegenüber einer (noch) fehlenden teCalc_PTT_manual.
+
+    Solange die echte Leitstand-Anbindung <TBD> ist, ist die manuelle
+    PTT-Tabelle auf manchen Servern eventuell noch nicht angelegt oder leer.
+    In dem Fall soll TTCheck trotzdem mit den vorhandenen MTT-Daten laufen
+    (jede Zeile bekommt dann Status 'PTT fehlt' statt eines Abbruchs) - siehe
+    bewertung.classify()/STATUS_NO_PTT.
+    """
+    try:
+        database.ensure_app_tables()
+    except Exception:  # noqa: BLE001
+        logger.exception("Konnte App-Tabellen (u.a. teCalc_PTT_manual) nicht anlegen")
+    try:
+        return database.get_ptt_map(proj_nr)
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("PTT-Daten konnten nicht geladen werden, TTCheck läuft ohne PTT weiter")
+        if not getattr(g, "_ptt_warning_flashed", False):
+            flash(
+                f"PTT-Daten (teCalc_PTT_manual) konnten nicht geladen werden – "
+                f"TTCheck zeigt die MTT-Daten trotzdem, Status 'PTT fehlt': {exc}",
+                "warning",
+            )
+            g._ptt_warning_flashed = True
+        return {}
 
 
 # =============================================================================
@@ -98,6 +125,34 @@ def shutdown():
     return render_template("main/shutdown.html")
 
 
+@main_bp.route("/tacttimes")
+def tacttimes_popup():
+    """PopUp Startseite: kompletter Inhalt der Datentabelle MAR_TactTimes."""
+    try:
+        rows = database.get_mtt_detail_alle()
+        error = None
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("TactTimes-PopUp: Laden von MAR_TactTimes fehlgeschlagen")
+        rows = []
+        error = str(exc)
+    return render_template("main/_tacttimes.html", rows=rows, error=error,
+                            table_name=config.SOURCE_TABLES["mtt_detail"])
+
+
+@main_bp.route("/tacttimescalc")
+def tacttimescalc_popup():
+    """PopUp Startseite: kompletter Inhalt der Datentabelle MAR_TactTimesCalc."""
+    try:
+        rows = database.get_mtt_calc()
+        error = None
+    except Exception as exc:  # noqa: BLE001
+        logger.exception("TactTimesCalc-PopUp: Laden von MAR_TactTimesCalc fehlgeschlagen")
+        rows = []
+        error = str(exc)
+    return render_template("main/_tacttimescalc.html", rows=rows, error=error,
+                            table_name=config.SOURCE_TABLES["mtt_calc"])
+
+
 # =============================================================================
 # ===== bewerten_bp – TTCheck, Projektdetails, Processdetails, Infor-Übernahme
 # =============================================================================
@@ -126,7 +181,7 @@ def index():
                 proj_nr_list = [r["projNr"] for r in lot_rows]
 
             mtt_rows = database.get_mtt_calc()
-            ptt_map = database.get_ptt_map()
+            ptt_map = _get_ptt_map()
             thresholds = settings.get_thresholds()
             proc_rows = bewertung.compute_process_level(mtt_rows, ptt_map, thresholds)
             proc_rows = bewertung.filter_process_rows(
@@ -160,7 +215,7 @@ def index():
 def ttcheck():
     try:
         mtt_rows = database.get_mtt_calc()
-        ptt_map = database.get_ptt_map()
+        ptt_map = _get_ptt_map()
         thresholds = settings.get_thresholds()
         proc_rows = bewertung.compute_process_level(mtt_rows, ptt_map, thresholds)
         count = dokumentation.record_ttcheck_run(proc_rows, _current_user())
@@ -185,7 +240,7 @@ def _load_projektdetails(proj_nr, proc_filter=None):
     empty_totals = {"board_tactTime_brutto_sum": 0, "panel_tactTime_brutto_sum": 0}
     if not mtt_rows:
         return {"proj_nr": proj_nr, "groups": [], "processes": [], "totals": empty_totals, "proc_filter": proc_filter}
-    ptt_map = database.get_ptt_map(proj_nr)
+    ptt_map = _get_ptt_map(proj_nr)
     thresholds = settings.get_thresholds()
     sub_rows = bewertung.compute_subprocess_level(mtt_rows, ptt_map, thresholds)
     proc_rows = bewertung.compute_process_level(mtt_rows, ptt_map, thresholds)
@@ -268,6 +323,22 @@ def infor_uebernehmen():
 
 @konfiguration_bp.route("/")
 def index():
+    ptt_rows = []
+    db_error = None
+    if _active_server_ok():
+        try:
+            # Selbstheilung: Falls die App-Tabellen (u.a. teCalc_PTT_manual) auf dem
+            # aktiven Server noch fehlen oder bei einem früheren Verbinden nicht
+            # angelegt werden konnten, hier erneut versuchen.
+            database.ensure_app_tables()
+        except Exception:  # noqa: BLE001
+            logger.exception("Konnte App-Tabellen beim Aufruf der Konfigurationsseite nicht anlegen")
+        try:
+            ptt_rows = database.get_ptt_rows()
+        except Exception as exc:  # noqa: BLE001
+            logger.exception("PTT-Einträge konnten nicht geladen werden")
+            db_error = str(exc)
+
     return render_template(
         "konfiguration/index.html",
         servers=config.DB_SERVERS,
@@ -275,7 +346,8 @@ def index():
         thresholds=settings.get_thresholds(),
         current_user=settings.get_current_user(),
         webserver=settings.get("webserver"),
-        ptt_rows=database.get_ptt_rows() if _active_server_ok() else [],
+        ptt_rows=ptt_rows,
+        db_error=db_error,
     )
 
 

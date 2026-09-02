@@ -13,9 +13,8 @@
         <img src="{{ url_for('static', filename='images/Titelbild_realTactTimes.png') }}" alt="Titelbild teRealTactTimes">
     </div>
     <div class="home-hero-actions">
-        <a href="{{ url_for('bewerten.index') }}" class="btn btn-primary">&#128202; Bewerten</a>
-        <a href="{{ url_for('konfiguration.index') }}" class="btn">&#9881; Konfiguration</a>
-        <a href="#" onclick="alert('KPIs sind laut Vorgabe noch nicht implementiert (kommt später).'); return false;" class="btn">&#128200; KPIs</a>
+        <button type="button" class="btn btn-primary" onclick="oeffneStartseitenPopup('{{ url_for('main.tacttimes_popup') }}')">&#128202; TactTimes</button>
+        <button type="button" class="btn btn-primary" onclick="oeffneStartseitenPopup('{{ url_for('main.tacttimescalc_popup') }}')">&#128202; TactTimesCalc</button>
     </div>
 </div>
 
@@ -43,4 +42,20 @@
         </p>
     </div>
 </div>
+
+<div id="startseitenModalContainer"></div>
+{% endblock %}
+
+{% block extra_scripts %}
+<script>
+function oeffneStartseitenPopup(url) {
+    fetch(url).then(r => r.text()).then(html => {
+        document.getElementById('startseitenModalContainer').innerHTML = html;
+    });
+}
+
+function schliesseStartseitenPopup() {
+    document.getElementById('startseitenModalContainer').innerHTML = '';
+}
+</script>
 {% endblock %}

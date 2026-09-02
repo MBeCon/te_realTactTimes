@@ -1,0 +1,40 @@
+<div class="modal-backdrop" onclick="if(event.target===this) schliesseStartseitenPopup()">
+    <div class="modal-box modal-box-xl">
+        <div class="modal-header">
+            <span>TactTimes &ndash; {{ table_name }}</span>
+            <span class="modal-close" onclick="schliesseStartseitenPopup()">&#10005;</span>
+        </div>
+        <div class="modal-body">
+            {% if error %}
+            <p class="text-error">Daten konnten nicht geladen werden: {{ error }}</p>
+            {% elif not rows %}
+            <p class="text-muted">Keine Daten in {{ table_name }} gefunden.</p>
+            {% else %}
+            <div class="table-wrapper">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        {% for col in rows[0].keys() %}
+                        <th>{{ col }}</th>
+                        {% endfor %}
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for r in rows %}
+                    <tr>
+                        {% for val in r.values() %}
+                        <td class="{{ 'num' if val is number else '' }}">{{ val if val is not none else "–" }}</td>
+                        {% endfor %}
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-sm text-muted mt-2">{{ rows|length }} Zeile(n) aus {{ table_name }}.</p>
+            {% endif %}
+        </div>
+        <div class="modal-footer">
+            <button type="button" class="btn" onclick="schliesseStartseitenPopup()">Schließen</button>
+        </div>
+    </div>
+</div>

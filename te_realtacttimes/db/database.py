@@ -312,6 +312,17 @@ def get_mtt_detail(proj_nr, process=None, sub_process=None, server_key=None):
     return execute_query(sql, params, server_key=server_key)
 
 
+def get_mtt_detail_alle(server_key=None):
+    """Alle Zeilen aus MAR_TactTimes (ungefiltert).
+
+    Für das TactTimes-PopUp auf der Startseite, das den kompletten Inhalt der
+    Quelltabelle anzeigt (siehe config.SOURCE_TABLES['mtt_detail']).
+    """
+    cols = ", ".join(f"[{c}]" for c in _MTT_DETAIL_COLUMNS)
+    sql = f"SELECT {cols} FROM [{config.SOURCE_TABLES['mtt_detail']}] ORDER BY [projNr], [lot], [process], [subProcess]"
+    return execute_query(sql, server_key=server_key)
+
+
 # =============================================================================
 # ===== PTT (Soll-Daten) – Übergangslösung teCalc_PTT_manual =====
 # =============================================================================

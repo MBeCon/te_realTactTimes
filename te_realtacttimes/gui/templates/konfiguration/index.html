@@ -177,6 +177,9 @@
                 <div class="form-field"><label class="field-label" for="ptt_value">PTT (min)</label><input type="text" id="ptt_value" name="ptt" required></div>
                 <button type="submit" class="btn btn-primary">Speichern</button>
             </form>
+            {% if db_error %}
+            <p class="text-error">PTT-Einträge konnten nicht geladen werden: {{ db_error }}</p>
+            {% else %}
             <div class="table-wrapper">
                 <table class="data-table">
                     <thead>
@@ -203,6 +206,7 @@
                     </tbody>
                 </table>
             </div>
+            {% endif %}
         </div>
         <div class="modal-footer">
             <button type="button" class="btn" onclick="closeModal('modalPtt')">Schließen</button>
