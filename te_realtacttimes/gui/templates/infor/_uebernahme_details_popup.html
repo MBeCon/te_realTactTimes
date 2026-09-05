@@ -1,0 +1,62 @@
+<div class="modal-backdrop" onclick="if(event.target===this) schliesseUebernahmeDetailsPopup()">
+    <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+            <span>Übernahme nach Infor{% if gruppe %} – {{ gruppe.projNr }}{% endif %}</span>
+            <span class="modal-close" onclick="schliesseUebernahmeDetailsPopup()">&#10005;</span>
+        </div>
+        <div class="modal-body">
+            {% if not gruppe %}
+            <p class="text-muted">Diese Übernahme konnte nicht (mehr) gefunden werden.</p>
+            <div class="form-actions">
+                <button type="button" class="btn" onclick="schliesseUebernahmeDetailsPopup()">Schließen</button>
+            </div>
+            {% else %}
+            <p class="text-sm">
+                <span class="field-label" style="display:inline;">Projektnummer:</span> {{ gruppe.projNr }}<br>
+                <span class="field-label" style="display:inline;">Übernahmedatum:</span> {{ gruppe.uebernahmedatum }}<br>
+                <span class="field-label" style="display:inline;">Bearbeiter:</span> {{ gruppe.bearbeiter }}<br>
+                <span class="field-label" style="display:inline;">Status:</span>
+                <span class="badge badge-{{ 'success' if gruppe.status != 'offen' else 'warning' }}">{{ gruppe.status }}</span>
+            </p>
+
+            <div class="table-wrapper mt-2">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Prozess</th>
+                        <th class="text-center">MTT (min)</th>
+                        <th class="text-center">PTT (alt, min)</th>
+                        <th class="text-center">Abw.</th>
+                        <th class="text-center">Abw. %</th>
+                        <th class="text-center">PTT neu (min)</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for p in gruppe.prozesse %}
+                    <tr>
+                        <td>{{ p.process }}</td>
+                        <td class="num-center">{{ p.mtt|komma(4) if p.mtt is not none else "–" }}</td>
+                        <td class="num-center">{{ p.ptt|komma(4) if p.ptt is not none else "–" }}</td>
+                        <td class="num-center">{{ p.abweichung|komma(4) if p.abweichung is not none else "–" }}</td>
+                        <td class="num-center">{{ p.abweichung_pct|komma(1) ~ "%" if p.abweichung_pct is not none else "–" }}</td>
+                        <td class="num-center text-bold">{{ p.ptt_neu|komma(4) if p.ptt_neu is not none else "–" }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            {% if gruppe.info %}
+            <div class="form-field mt-2">
+                <label class="field-label">Info</label>
+                <div class="richtext-editor">{{ gruppe.info|safe }}</div>
+            </div>
+            {% endif %}
+
+            <div class="form-actions">
+                <button type="button" class="btn" onclick="schliesseUebernahmeDetailsPopup()">Schließen</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>

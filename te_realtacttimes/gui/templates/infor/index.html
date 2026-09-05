@@ -8,79 +8,159 @@
     </div>
 </div>
 
-<div class="content-section">
-    <div class="content-section-header">Übernahmen ins Infor</div>
-    <div class="content-section-body">
-        {% if infor_changes_ddl %}
-        <div class="content-section" style="margin-bottom:12px;">
-            <div class="content-section-header">Tabelle teCalc_COR_INFORchanges konnte nicht automatisch angelegt werden</div>
-            <div class="content-section-body">
-                <p class="text-sm text-muted mb-2">
-                    Vermutlich fehlt dem Datenbank-Login der App die Berechtigung zum Anlegen von Tabellen
-                    (CREATE TABLE). Diese Anweisung kann ein Datenbank-Administrator einmalig manuell ausführen:
-                </p>
-                <pre style="background:#F7F7F7; border:1px solid var(--app-border); padding:8px; font-size:10px; overflow-x:auto; white-space:pre;">{{ infor_changes_ddl }}</pre>
+<div class="infor-layout">
+    <div class="content-section infor-filter-panel">
+        <div class="content-section-header">
+            Projekte
+            <span class="info-icon" title="Nur die hier angehakten Projekte werden rechts in der Liste 'Übernahmen ins Infor' angezeigt.">?</span>
+        </div>
+        <div class="content-section-body">
+            {% if infor_changes_ddl %}
+            <div class="content-section" style="margin-bottom:10px;">
+                <div class="content-section-header">teCalc_COR_INFORchanges konnte nicht automatisch angelegt werden</div>
+                <div class="content-section-body">
+                    <p class="text-sm text-muted mb-2">
+                        Vermutlich fehlt dem Datenbank-Login der App die Berechtigung zum Anlegen von
+                        Tabellen (CREATE TABLE). Diese Anweisung kann ein Datenbank-Administrator einmalig
+                        manuell ausführen:
+                    </p>
+                    <pre style="background:#F7F7F7; border:1px solid var(--app-border); padding:8px; font-size:10px; overflow-x:auto; white-space:pre;">{{ infor_changes_ddl }}</pre>
+                </div>
             </div>
-        </div>
-        {% endif %}
-        {% if db_error %}
-        <p class="text-error">Liste der Infor-Übernahmen konnte nicht geladen werden: {{ db_error }}</p>
-        {% else %}
-        <div class="form-field mb-2" style="max-width:220px;">
-            <label class="field-label" for="inforFilterInput">Filter: Projektnummer</label>
-            <input type="text" id="inforFilterInput" oninput="inforFilterUpdate()" placeholder="z.B. 0067">
-        </div>
-        <div class="table-wrapper">
-            <table class="data-table" id="inforTabelle">
-                <thead>
-                <tr>
-                    <th>Projektnummer</th>
-                    <th>Prozess</th>
-                    <th>Übernahmedatum</th>
-                    <th>Bearbeiter</th>
-                    <th class="text-center">MTT (min)</th>
-                    <th class="text-center">PTT (alt, min)</th>
-                    <th class="text-center">Abw.</th>
-                    <th class="text-center">Abw. %</th>
-                    <th class="text-center">PTT neu (min)</th>
-                    <th>Status</th>
-                </tr>
-                </thead>
-                <tbody>
-                {% for r in rows %}
-                <tr data-proj="{{ r.projNr }}">
-                    <td class="text-bold text-primary">{{ r.projNr }}</td>
-                    <td>{{ r.process }}</td>
-                    <td class="text-sm">{{ r.uebernahmedatum }}</td>
-                    <td>{{ r.bearbeiter }}</td>
-                    <td class="num-center">{{ r.mtt|komma(4) if r.mtt is not none else "–" }}</td>
-                    <td class="num-center">{{ r.ptt|komma(4) if r.ptt is not none else "–" }}</td>
-                    <td class="num-center">{{ r.abweichung|komma(4) if r.abweichung is not none else "–" }}</td>
-                    <td class="num-center">{{ r.abweichung_pct|komma(1) ~ "%" if r.abweichung_pct is not none else "–" }}</td>
-                    <td class="num-center">{{ r.ptt_neu|komma(4) if r.ptt_neu is not none else "–" }}</td>
-                    <td><span class="badge badge-{{ 'success' if r.status != 'offen' else 'warning' }}">{{ r.status }}</span></td>
-                </tr>
-                {% else %}
-                <tr><td colspan="10" class="text-muted">Noch keine Übernahmen ins Infor dokumentiert.</td></tr>
+            {% endif %}
+            {% if db_error %}
+            <p class="text-error">Liste der Infor-Übernahmen konnte nicht geladen werden: {{ db_error }}</p>
+            {% elif not projekte_uebersicht %}
+            <p class="text-muted">Noch keine Übernahmen ins Infor dokumentiert.</p>
+            {% else %}
+            <div class="form-field mb-2">
+                <label class="field-label" for="inforProjekteFilterInput">Filter: Projektnummer</label>
+                <input type="text" id="inforProjekteFilterInput" oninput="inforProjekteFilterUpdate()" placeholder="z.B. 0067">
+            </div>
+            <div class="flex-gap mb-2" style="align-items:center;">
+                <button type="button" class="btn btn-sm" onclick="inforProjekteAuswahl(true)">Alle</button>
+                <button type="button" class="btn btn-sm" onclick="inforProjekteAuswahl(false)">Keine</button>
+                <span class="text-sm text-muted" id="inforProjekteCountText"></span>
+            </div>
+            <div class="projekte-liste" id="inforProjekteListe">
+                {% for p in projekte_uebersicht %}
+                <label title="Letzte Übernahme: {{ p.uebernahmedatum }} ({{ p.bearbeiter }})">
+                    <input type="checkbox" value="{{ p.projNr }}" onchange="inforProjekteCountUpdate(); inforListeUpdate();">
+                    <span class="proj-label-text">{{ p.projNr }}</span>
+                </label>
                 {% endfor %}
-                </tbody>
-            </table>
+            </div>
+            {% endif %}
         </div>
-        <p class="text-sm text-muted mt-2">{{ rows|length }} Übernahme(n). Neueste zuerst.</p>
-        {% endif %}
+    </div>
+
+    <div class="content-section infor-liste-panel">
+        <div class="content-section-header">
+            Übernahmen ins Infor
+            <span class="info-icon" title="Klick auf 'Übernahmedatum' zeigt alle Details (Prozesse, Zeiten, Info) dieser Übernahme.">?</span>
+        </div>
+        <div class="content-section-body">
+            {% if not db_error and uebernahmen %}
+            <div class="table-wrapper">
+                <table class="data-table" id="inforUebernahmenTabelle">
+                    <thead>
+                    <tr>
+                        <th>Übernahmedatum</th>
+                        <th>Bearbeiter</th>
+                        <th>Status</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for e in uebernahmen %}
+                    <tr data-proj="{{ e.projNr }}" class="hidden">
+                        <td class="text-sm text-primary text-bold" style="cursor:pointer;"
+                            onclick="oeffneUebernahmeDetailsPopup('{{ e.projNr }}', '{{ e.uebernahmedatum }}', '{{ e.bearbeiter }}', '{{ e.vorgang_id or '' }}')"
+                            title="Klick: Details ansehen (Prozesse, Zeiten, Info)">{{ e.uebernahmedatum }}</td>
+                        <td>{{ e.bearbeiter }}</td>
+                        <td><span class="badge badge-{{ 'success' if e.status != 'offen' else 'warning' }}">{{ e.status }}</span></td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+            <p class="text-sm text-muted mt-2" id="inforUebernahmenCountText"></p>
+            {% elif not db_error %}
+            <p class="text-muted">Links mindestens ein Projekt markieren, um die zugehörigen Übernahmen zu sehen.</p>
+            {% endif %}
+        </div>
     </div>
 </div>
+
+<div id="inforDetailsModalContainer"></div>
 {% endblock %}
 
 {% block extra_scripts %}
 <script>
-function inforFilterUpdate() {
-    const filterInput = document.getElementById('inforFilterInput');
+function inforProjekteAuswahl(checked) {
+    // Wirkt nur auf aktuell sichtbare (nicht durch den Projektnummer-Filter
+    // ausgeblendete) Zeilen, gleiches Muster wie projekteAuswahl() auf der
+    // Bewerten-Seite.
+    document.querySelectorAll('#inforProjekteListe label:not(.hidden) input[type=checkbox]').forEach(cb => cb.checked = checked);
+    inforProjekteCountUpdate();
+    inforListeUpdate();
+}
+
+function inforProjekteFilterUpdate() {
+    const filterInput = document.getElementById('inforProjekteFilterInput');
     const filter = (filterInput ? filterInput.value : '').trim().toLowerCase();
-    document.querySelectorAll('#inforTabelle tbody tr[data-proj]').forEach(function (tr) {
-        const projNr = (tr.dataset.proj || '').toLowerCase();
-        tr.classList.toggle('hidden', filter !== '' && !projNr.includes(filter));
+    document.querySelectorAll('#inforProjekteListe label').forEach(function (label) {
+        const text = label.querySelector('.proj-label-text');
+        const projNr = text ? text.textContent.toLowerCase() : '';
+        label.classList.toggle('hidden', filter !== '' && !projNr.includes(filter));
     });
 }
+
+function inforProjekteCountUpdate() {
+    const label = document.getElementById('inforProjekteCountText');
+    if (!label) return;
+    const boxen = document.querySelectorAll('#inforProjekteListe input[type=checkbox]');
+    const angehakt = document.querySelectorAll('#inforProjekteListe input[type=checkbox]:checked').length;
+    label.textContent = angehakt + ' von ' + boxen.length + ' ausgewählt';
+}
+
+// Die Liste "Übernahmen ins Infor" (rechtes Panel) zeigt IMMER nur die
+// Vorgänge der links markierten Projekte - ist keine Checkbox angehakt
+// (Standard beim Laden der Seite), bleibt die Liste bewusst leer, statt
+// ungefiltert alle Projekte zu mischen (die Liste hat dafür bewusst keine
+// eigene Projektnummer-Spalte mehr, siehe _uebernahme_details_popup.html
+// fuer die vollen Details je Vorgang).
+function inforListeUpdate() {
+    const ausgewaehlt = new Set();
+    document.querySelectorAll('#inforProjekteListe input[type=checkbox]:checked').forEach(cb => ausgewaehlt.add(cb.value));
+    let sichtbar = 0;
+    document.querySelectorAll('#inforUebernahmenTabelle tbody tr[data-proj]').forEach(function (tr) {
+        const zeigen = ausgewaehlt.has(tr.dataset.proj);
+        tr.classList.toggle('hidden', !zeigen);
+        if (zeigen) sichtbar++;
+    });
+    const countLabel = document.getElementById('inforUebernahmenCountText');
+    if (countLabel) {
+        countLabel.textContent = sichtbar + ' Übernahme(n) für die ausgewählten Projekte. Neueste zuerst.';
+    }
+}
+
+function oeffneUebernahmeDetailsPopup(projNr, uebernahmedatum, bearbeiter, vorgangId) {
+    // vorgangId ist bei aelteren Uebernahmen (vor Einfuehrung der Spalte
+    // vorgang_id) leer - die Route faellt dann automatisch auf den
+    // zusammengesetzten Schluessel (uebernahmedatum/bearbeiter) zurueck.
+    const params = new URLSearchParams({projNr: projNr, uebernahmedatum: uebernahmedatum, bearbeiter: bearbeiter, vorgang_id: vorgangId || ''});
+    fetch('{{ url_for("infor.uebernahme_details_popup") }}?' + params.toString())
+        .then(r => r.text())
+        .then(html => { document.getElementById('inforDetailsModalContainer').innerHTML = html; });
+}
+
+function schliesseUebernahmeDetailsPopup() {
+    document.getElementById('inforDetailsModalContainer').innerHTML = '';
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+    inforProjekteCountUpdate();
+    inforListeUpdate();
+});
 </script>
 {% endblock %}

@@ -312,10 +312,19 @@ table.data-table thead th.text-right { text-align: right; }
     padding: 8px 12px; border-top: 1px solid var(--app-border);
     display: flex; justify-content: flex-end; gap: 6px;
 }
-/* ===== Bewerten: Projekte-Liste (25%) + TactTimeCheck (75%) ===== */
+/* ===== Bewerten: Projekte-Liste (0-25%) + TactTimeCheck (25-75%) + Arbeitsbereich frei (75-100%) ===== */
 .bewerten-layout { display: flex; align-items: flex-start; gap: 14px; }
 .bewerten-layout .projekte-panel { flex: 0 0 25%; max-width: 25%; }
-.bewerten-layout .tactcheck-panel { flex: 0 0 75%; max-width: 75%; min-width: 0; }
+.bewerten-layout .tactcheck-panel { flex: 0 0 50%; max-width: 50%; min-width: 0; }
+.bewerten-layout .workspace-empty { flex: 0 0 25%; max-width: 25%; }
+
+/* INFOR-Übernahme-Seite: gleiches 2-Panel-Prinzip wie .bewerten-layout
+   (Projekte-Filter links 25%, Liste rechts nimmt den Rest ein). */
+.infor-layout { display: flex; align-items: flex-start; gap: 14px; }
+.infor-layout .infor-filter-panel { flex: 0 0 25%; max-width: 25%; }
+.infor-layout .infor-liste-panel { flex: 1 1 auto; min-width: 0; }
+.projekte-toolbar { display: flex; align-items: flex-end; gap: 8px; }
+.projekte-toolbar .form-field { flex: 1 1 auto; min-width: 0; }
 .projekte-liste {
     max-height: 560px; overflow-y: auto; border: 1px solid var(--app-border);
 }
@@ -368,6 +377,29 @@ table.data-table thead th.text-right { text-align: right; }
 .text-right   { text-align: right; }
 .text-center  { text-align: center; }
 .text-bold    { font-weight: bold; }
+
+/* Bewerten: Schriftfarbe Abw./Abw.% je nach Status (OK gruen, Warngrenze orange, Aktionsgrenze rot, sonst schwarz) */
+.status-ok     { color: var(--app-success); }
+.status-warn   { color: var(--app-warning); }
+.status-action { color: var(--app-error); }
+
+/* Bewerten: Bestätigungs-PopUp "nach Infor übernehmen" - Info-Feld (Richtext) */
+.richtext-toolbar { display: flex; gap: 4px; margin-bottom: 4px; }
+.richtext-toolbar button {
+    min-width: 24px; height: 22px; padding: 2px 6px; font-size: 9px;
+    border: 1px solid var(--app-border); background: #FFFFFF; color: var(--app-text); cursor: pointer;
+}
+.richtext-toolbar button:hover { background: var(--app-sidebar-bg); }
+.richtext-editor {
+    min-height: 90px; max-height: 240px; overflow-y: auto; padding: 6px 8px;
+    border: 1px solid var(--app-border); background: #FFFFFF; font-size: 10px;
+}
+.richtext-editor:focus {
+    outline: none; border-color: var(--app-primary);
+    box-shadow: 0 0 0 2px rgba(70, 6, 122, 0.12);
+}
+.richtext-editor p { margin: 0 0 6px; }
+.richtext-editor ul, .richtext-editor ol { margin: 0 0 6px 18px; padding: 0; }
 .text-sm      { font-size: 9px; }
 .mt-1 { margin-top: 4px; } .mt-2 { margin-top: 8px; } .mt-3 { margin-top: 12px; }
 .mb-1 { margin-bottom: 4px; } .mb-2 { margin-bottom: 8px; } .mb-3 { margin-bottom: 12px; }

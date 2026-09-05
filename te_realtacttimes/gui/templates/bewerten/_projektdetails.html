@@ -17,6 +17,21 @@
         <button type="button" class="btn" onclick="schliesseProjektdetailsPopup()">Schließen</button>
     </div>
     {% else %}
+    {% set status_tooltips = {
+        'ok': 'OK: Die Abweichung zwischen MTT und PTT liegt innerhalb der Warngrenze ('
+            ~ thresholds.warn_lower_pct|komma(1) ~ '% bis ' ~ thresholds.warn_upper_pct|komma(1)
+            ~ '%) und der Aktionsgrenze (' ~ thresholds.action_lower_pct|komma(1) ~ '% bis '
+            ~ thresholds.action_upper_pct|komma(1) ~ '%).',
+        'warn': 'Warngrenze: Die Abweichung zwischen MTT und PTT übersteigt die konfigurierte Warngrenze ('
+            ~ thresholds.warn_lower_pct|komma(1) ~ '% bis ' ~ thresholds.warn_upper_pct|komma(1)
+            ~ '%), liegt aber unterhalb der Aktionsgrenze (' ~ thresholds.action_lower_pct|komma(1)
+            ~ '% bis ' ~ thresholds.action_upper_pct|komma(1) ~ '%).',
+        'action': 'Aktionsgrenze: Die Abweichung zwischen MTT und PTT übersteigt die konfigurierte Warngrenze ('
+            ~ thresholds.warn_lower_pct|komma(1) ~ '% bis ' ~ thresholds.warn_upper_pct|komma(1)
+            ~ '%) UND die Aktionsgrenze (' ~ thresholds.action_lower_pct|komma(1) ~ '% bis '
+            ~ thresholds.action_upper_pct|komma(1) ~ '%).',
+        'no_ptt': 'PTT fehlt: Der PTT-Wert (Sollwert) fehlt, daher kann die Abweichung nicht berechnet werden.',
+    } %}
     <form method="POST" action="{{ url_for('bewerten.infor_uebernehmen') }}">
         <input type="hidden" name="proj_nr" value="{{ d.proj_nr }}">
         <div class="table-wrapper">
@@ -43,15 +58,17 @@
                     <td>{{ p.process }} <span class="text-sm text-muted">({{ p.sub_process_count }} Subprozess(e))</span></td>
                     <td class="num-center">{{ p.mtt|komma(4) if p.mtt is not none else "–" }}</td>
                     <td class="num-center">{{ p.ptt|komma(4) if p.ptt is not none else "–" }}</td>
-                    <td class="num-center">{{ p.abweichung|komma(4) if p.abweichung is not none else "–" }}</td>
-                    <td class="num-center">{{ p.abweichung_pct|komma(1) ~ "%" if p.abweichung_pct is not none else "–" }}</td>
+                    <td class="num-center {{ p.status|statuscolor }}">{{ p.abweichung|komma(4) if p.abweichung is not none else "–" }}</td>
+                    <td class="num-center {{ p.status|statuscolor }}">{{ p.abweichung_pct|komma(1) ~ "%" if p.abweichung_pct is not none else "–" }}</td>
                     <td>
-                        <span class="badge badge-{{ 'success' if p.status=='ok' else ('warning' if p.status=='warn' else ('error' if p.status=='action' else 'muted')) }}">
+                        <span class="badge badge-{{ 'success' if p.status=='ok' else ('warning' if p.status=='warn' else ('error' if p.status=='action' else 'muted')) }}"
+                              title="{{ status_tooltips.get(p.status, '') }}">
                             {{ p.status_label }}
                         </span>
                     </td>
                     <td class="infor-col">
                         <input type="text" id="korrektur_{{ p.process }}" name="korrektur_{{ p.process }}"
+                               class="korrektur-feld" oninput="korrekturSummeUpdate()"
                                value="{{ p.mtt|komma(4) if p.mtt is not none else '' }}" disabled style="width:110px;">
                     </td>
                 </tr>
@@ -65,10 +82,11 @@
                     </td>
                     <td class="num-center">{{ s.mtt|komma(4) if s.mtt is not none else "–" }}</td>
                     <td class="num-center">{{ s.ptt|komma(4) if s.ptt is not none else "–" }}</td>
-                    <td class="num-center">{{ s.abweichung|komma(4) if s.abweichung is not none else "–" }}</td>
-                    <td class="num-center">{{ s.abweichung_pct|komma(1) ~ "%" if s.abweichung_pct is not none else "–" }}</td>
+                    <td class="num-center text-bold {{ s.status|statuscolor }}">{{ s.abweichung|komma(4) if s.abweichung is not none else "–" }}</td>
+                    <td class="num-center {{ s.status|statuscolor }}">{{ s.abweichung_pct|komma(1) ~ "%" if s.abweichung_pct is not none else "–" }}</td>
                     <td>
-                        <span class="badge badge-{{ 'success' if s.status=='ok' else ('warning' if s.status=='warn' else ('error' if s.status=='action' else 'muted')) }} text-sm">
+                        <span class="badge badge-{{ 'success' if s.status=='ok' else ('warning' if s.status=='warn' else ('error' if s.status=='action' else 'muted')) }} text-sm"
+                              title="{{ status_tooltips.get(s.status, '') }}">
                             {{ s.status_label }}
                         </span>
                     </td>
@@ -80,17 +98,19 @@
                 <tfoot>
                 <tr>
                     <td class="infor-col"></td>
-                    <td>Summe (board / panel tactTime brutto)</td>
-                    <td class="num" colspan="2">{{ d.totals.board_tactTime_brutto_sum|komma(4) }}</td>
-                    <td class="num" colspan="2">{{ d.totals.panel_tactTime_brutto_sum|komma(4) }}</td>
+                    <td>Summe (Prozesse, ohne Subprozesse)</td>
+                    <td class="num-center">{{ d.totals.mtt_sum|komma(4) }}</td>
+                    <td class="num-center">{{ d.totals.ptt_sum|komma(4) }}</td>
+                    <td class="num-center text-bold">{{ d.totals.abweichung_sum|komma(4) }}</td>
                     <td></td>
-                    <td class="infor-col"></td>
+                    <td></td>
+                    <td class="infor-col text-bold" id="korrekturSummeCell" style="color:#000000;">{{ d.totals.mtt_sum|komma(4) }}</td>
                 </tr>
                 </tfoot>
             </table>
         </div>
         <div class="form-actions">
-            <button type="submit" id="inforUebernehmenBtn" class="btn btn-primary">&#10132; nach Infor übernehmen</button>
+            <button type="button" id="inforUebernehmenBtn" class="btn btn-primary" onclick="oeffneInforBestaetigung(this.form)">&#10132; nach Infor übernehmen</button>
             <button type="button" class="btn" onclick="schliesseProjektdetailsPopup()">Schließen</button>
         </div>
     </form>

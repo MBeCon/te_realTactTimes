@@ -214,10 +214,11 @@ def index():
 
     # ===== Projekte-Liste (Checkbox-Auswahl links neben TactTimeCheck) =====
     # Solange proj_filter_active nicht gesetzt ist (frischer Seitenaufruf, noch
-    # keine Auswahl getroffen), gelten alle Projekte als ausgewählt (kein
-    # Regressionsverhalten ggü. vorher). Sobald das Projekte-Formular einmal
-    # abgeschickt wurde, ist proj_filter_active=1 gesetzt und die tatsächlich
-    # angehakten Projekte (auch: keines) sind maßgeblich.
+    # keine Auswahl getroffen), ist standardmaessig KEIN Projekt angehakt
+    # (Nutzer-Vorgabe, Teil 18 - vorher: alle Projekte per Default ausgewaehlt).
+    # Sobald das Projekte-Formular einmal abgeschickt wurde, ist
+    # proj_filter_active=1 gesetzt und die tatsächlich angehakten Projekte
+    # (auch: keines) sind maßgeblich.
     projekte_error = None
     try:
         alle_projekte = database.get_mtt_calc_projects()
@@ -234,7 +235,12 @@ def index():
     alle_projekte = sorted(alle_projekte, key=lambda p: 0 if p in stale_projekte else 1)
 
     proj_filter_active = request.args.get("proj_filter_active") == "1"
-    ausgewaehlte_projekte = request.args.getlist("proj") if proj_filter_active else list(alle_projekte)
+    # Standardmaessig (frischer Seitenaufruf, proj_filter_active noch nie
+    # gesetzt) ist KEIN Projekt angehakt - Nutzer-Vorgabe (vorher: alle
+    # Projekte per Default ausgewaehlt). Sobald das Projekte-Formular einmal
+    # abgeschickt wurde (proj_filter_active=1), zaehlt wie bisher exakt die
+    # tatsaechliche Checkbox-Auswahl.
+    ausgewaehlte_projekte = request.args.getlist("proj") if proj_filter_active else []
     ausgewaehlte_projekte_set = set(ausgewaehlte_projekte)
 
     rows = []
@@ -337,7 +343,7 @@ def _keep_args():
 
 def _load_projektdetails(proj_nr, proc_filter=None):
     mtt_rows = database.get_mtt_calc(proj_nr)
-    empty_totals = {"board_tactTime_brutto_sum": 0, "panel_tactTime_brutto_sum": 0}
+    empty_totals = {"mtt_sum": 0, "ptt_sum": 0, "abweichung_sum": 0}
     if not mtt_rows:
         return {"proj_nr": proj_nr, "groups": [], "processes": [], "totals": empty_totals, "proc_filter": proc_filter}
     ptt_map = _get_ptt_map(proj_nr)
@@ -358,7 +364,10 @@ def _load_projektdetails(proj_nr, proc_filter=None):
     for proc in sorted(proc_rows, key=lambda r: (r.get("prozessOrder") if r.get("prozessOrder") is not None else 999, r["process"])):
         groups.append({"process_row": proc, "sub_rows": sub_by_process.get(proc["process"], [])})
 
-    totals = bewertung.totals(sub_rows)
+    # Summen NUR ueber die Prozess-Zeilen (proc_rows), NICHT ueber sub_rows -
+    # Subprozesse sind in den Projektdetails reine Zusatzinformation und
+    # sollen laut Vorgabe nicht mitsummiert werden.
+    totals = bewertung.totals(proc_rows)
     return {"proj_nr": proj_nr, "groups": groups, "processes": processes, "totals": totals, "proc_filter": proc_filter}
 
 
@@ -366,7 +375,8 @@ def _load_projektdetails(proj_nr, proc_filter=None):
 def projekt_partial(proj_nr):
     proc_filter = request.args.get("proc_filter", "").strip() or None
     details = _load_projektdetails(proj_nr, proc_filter)
-    return render_template("bewerten/_projektdetails.html", d=details, status_labels=config.STATUS_LABELS)
+    return render_template("bewerten/_projektdetails.html", d=details, status_labels=config.STATUS_LABELS,
+                            thresholds=settings.get_thresholds())
 
 
 @bewerten_bp.route("/projekt/<proj_nr>/popup")
@@ -379,7 +389,8 @@ def projekt_popup(proj_nr):
     """
     proc_filter = request.args.get("proc_filter", "").strip() or None
     details = _load_projektdetails(proj_nr, proc_filter)
-    return render_template("bewerten/_projektdetails_popup.html", d=details, status_labels=config.STATUS_LABELS)
+    return render_template("bewerten/_projektdetails_popup.html", d=details, status_labels=config.STATUS_LABELS,
+                            thresholds=settings.get_thresholds())
 
 
 @bewerten_bp.route("/prozess/<proj_nr>/<process>")
@@ -388,46 +399,72 @@ def prozess_popup(proj_nr, process):
     return render_template("bewerten/_processdetails.html", proj_nr=proj_nr, process=process, rows=rows)
 
 
-@bewerten_bp.route("/infor/uebernehmen", methods=["POST"])
-def infor_uebernehmen():
+def _build_infor_selected_rows(proj_nr, processes):
+    """Baut aus den im Formular markierten Prozessen + Korrektur-Feldern die
+    Zeilen, die (nach Bestätigung im PopUp) nach teCalc_COR_INFORchanges
+    übernommen werden. Wird sowohl von der Vorschau (Bestätigungs-PopUp) als
+    auch vom eigentlichen Speichern verwendet, damit beide exakt dieselben
+    Werte berechnen."""
+    details = _load_projektdetails(proj_nr)
+    by_process = {g["process_row"]["process"]: g["process_row"] for g in details["groups"]}
+
+    selected_rows = []
+    for process in processes:
+        proc_row = by_process.get(process)
+        if proc_row is None:
+            continue
+        mtt_val = proc_row.get("mtt")
+        korrektur_field = f"korrektur_{process}"
+        ptt_neu_raw = request.form.get(korrektur_field, "").strip().replace(",", ".")
+        try:
+            ptt_neu = float(ptt_neu_raw) if ptt_neu_raw else mtt_val
+        except ValueError:
+            ptt_neu = mtt_val
+        selected_rows.append({
+            "projNr": proj_nr, "process": process, "mtt": mtt_val, "ptt": proc_row.get("ptt"),
+            "abweichung": proc_row.get("abweichung"), "abweichung_pct": proc_row.get("abweichung_pct"),
+            "status": proc_row.get("status"), "ptt_neu": ptt_neu,
+        })
+    return selected_rows
+
+
+@bewerten_bp.route("/infor/uebernehmen/vorschau", methods=["POST"])
+def infor_uebernehmen_vorschau():
+    """Liefert das Bestätigungs-PopUp (Zusammenfassung + Bearbeiter + Info-Feld),
+    das vor dem eigentlichen Speichern (bewerten.infor_uebernehmen) angezeigt
+    wird. Es werden dabei noch KEINE Daten geschrieben."""
     proj_nr = request.form.get("proj_nr", "").strip()
     processes = request.form.getlist("uebernehmen")
+    selected_rows = _build_infor_selected_rows(proj_nr, processes) if proj_nr and processes else []
+    return render_template(
+        "bewerten/_infor_uebernehmen_confirm.html",
+        proj_nr=proj_nr, selected_rows=selected_rows, bearbeiter=_current_user(),
+    )
+
+
+@bewerten_bp.route("/infor/uebernehmen", methods=["POST"])
+def infor_uebernehmen():
+    """Speichert die im Bestätigungs-PopUp bestätigte Infor-Übernahme. Wird
+    ausschließlich per AJAX aus diesem PopUp aufgerufen (siehe
+    _infor_uebernehmen_confirm.html) und liefert daher JSON statt eines
+    Redirects - das PopUp zeigt Erfolg/Fehler selbst an, ohne die Seite neu
+    zu laden."""
+    proj_nr = request.form.get("proj_nr", "").strip()
+    processes = request.form.getlist("uebernehmen")
+    info = (request.form.get("info") or "").strip() or None
     if not proj_nr:
-        flash("Kein Projekt ausgewählt.", "error")
-        return redirect(url_for("bewerten.index", **_keep_args()))
+        return jsonify({"ok": False, "error": "Kein Projekt ausgewählt."}), 400
     if not processes:
-        flash("Es wurde kein Prozess zur Übernahme markiert.", "warning")
-        return redirect(url_for("bewerten.index", selected_proj=proj_nr, **_keep_args()))
+        return jsonify({"ok": False, "error": "Es wurde kein Prozess zur Übernahme markiert."}), 400
 
     try:
-        details = _load_projektdetails(proj_nr)
-        by_process = {g["process_row"]["process"]: g["process_row"] for g in details["groups"]}
-
-        selected_rows = []
-        for process in processes:
-            proc_row = by_process.get(process)
-            if proc_row is None:
-                continue
-            mtt_val = proc_row.get("mtt")
-            korrektur_field = f"korrektur_{process}"
-            ptt_neu_raw = request.form.get(korrektur_field, "").strip().replace(",", ".")
-            try:
-                ptt_neu = float(ptt_neu_raw) if ptt_neu_raw else mtt_val
-            except ValueError:
-                ptt_neu = mtt_val
-            selected_rows.append({
-                "projNr": proj_nr, "process": process, "mtt": mtt_val, "ptt": proc_row.get("ptt"),
-                "abweichung": proc_row.get("abweichung"), "abweichung_pct": proc_row.get("abweichung_pct"),
-                "ptt_neu": ptt_neu,
-            })
-
-        count = dokumentation.record_infor_transfer(selected_rows, _current_user())
-        flash(f"{count} Korrektur(en) für {proj_nr} nach teCalc_COR_INFORchanges übernommen.", "success")
+        selected_rows = _build_infor_selected_rows(proj_nr, processes)
+        count = dokumentation.record_infor_transfer(selected_rows, _current_user(), info=info)
+        logger.info("Infor-Übernahme: %s Korrektur(en) für %s gespeichert.", count, proj_nr)
+        return jsonify({"ok": True, "count": count})
     except Exception as exc:  # noqa: BLE001
         logger.exception("Infor-Übernahme fehlgeschlagen")
-        flash(f"Übernahme fehlgeschlagen: {exc}", "error")
-
-    return redirect(url_for("bewerten.index", selected_proj=proj_nr, **_keep_args()))
+        return jsonify({"ok": False, "error": str(exc)}), 500
 
 
 # =============================================================================
@@ -667,7 +704,8 @@ def loeschen():
 
 @infor_bp.route("/")
 def index():
-    rows = []
+    projekte_uebersicht = []
+    uebernahmen = []
     db_error = None
     infor_changes_ddl = None
     if _active_server_ok():
@@ -688,12 +726,55 @@ def index():
                 logger.exception("DDL für teCalc_COR_INFORchanges konnte nicht ermittelt werden")
         try:
             rows = dokumentation.get_infor_changes()
+            projekte_uebersicht, uebernahmen = dokumentation.group_infor_changes_by_uebernahme(rows)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Liste der Infor-Übernahmen konnte nicht geladen werden")
             db_error = str(exc)
     return render_template(
-        "infor/index.html", rows=rows, db_error=db_error, infor_changes_ddl=infor_changes_ddl,
+        "infor/index.html", projekte_uebersicht=projekte_uebersicht, uebernahmen=uebernahmen,
+        db_error=db_error, infor_changes_ddl=infor_changes_ddl,
     )
+
+
+@infor_bp.route("/uebernahme/details")
+def uebernahme_details_popup():
+    """Liefert das Detail-PopUp zu EINEM Übernahme-Vorgang (Klick auf
+    "Übernahmedatum" in der Liste "Übernahmen ins Infor"): zeigt alle
+    Prozesse/Zeiten dieses Vorgangs + den Info-Freitext.
+
+    Query-Params statt Pfad-Segmenten (robuster gegen Sonderzeichen, gleiches
+    Muster wie ptt.bearbeiten_popup). Identifikation des Vorgangs:
+    - `vorgang_id` (bevorzugt, für alle seit Einführung dieser Spalte neu
+      gespeicherten Übernahmen eindeutig, siehe database.
+      save_infor_change_rows()).
+    - Fallback über den zusammengesetzten Schlüssel projNr/uebernahmedatum/
+      bearbeiter für ältere Zeilen ohne vorgang_id (siehe dokumentation.
+      group_infor_changes_by_uebernahme())."""
+    proj_nr = request.args.get("projNr", "").strip()
+    vorgang_id = request.args.get("vorgang_id", "").strip()
+    uebernahmedatum = request.args.get("uebernahmedatum", "").strip()
+    bearbeiter = request.args.get("bearbeiter", "").strip()
+    gruppe = None
+    if proj_nr:
+        try:
+            rows = dokumentation.get_infor_changes(proj_nr)
+            if vorgang_id:
+                treffer = [r for r in rows if r.get("vorgang_id") == vorgang_id]
+            else:
+                treffer = [
+                    r for r in rows
+                    if not r.get("vorgang_id")
+                    and r["uebernahmedatum"] == uebernahmedatum and r["bearbeiter"] == bearbeiter
+                ]
+            if treffer:
+                gruppe = {
+                    "projNr": proj_nr, "uebernahmedatum": treffer[0]["uebernahmedatum"],
+                    "bearbeiter": treffer[0]["bearbeiter"],
+                    "status": treffer[0]["status"], "info": treffer[0].get("info"), "prozesse": treffer,
+                }
+        except Exception:  # noqa: BLE001
+            logger.exception("Uebernahme-Details konnten nicht geladen werden")
+    return render_template("infor/_uebernahme_details_popup.html", gruppe=gruppe)
 
 
 # =============================================================================

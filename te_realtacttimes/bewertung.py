@@ -96,17 +96,15 @@ def compute_process_level(mtt_calc_rows, ptt_map, thresholds):
     for gkey in order:
         proj_nr, process = gkey
         rows = groups[gkey]
-        mtt_values = [r.get("board_tactTime_brutto") for r in rows]
-        if any(v is None for v in mtt_values):
-            mtt_sum = None
-        else:
-            mtt_sum = sum(mtt_values)
+        # Fehlende Werte einzelner Subprozesse werden bei der Summe uebersprungen
+        # (nicht als 0 gezaehlt, aber auch nicht die ganze Summe auf None setzen) -
+        # nur wenn ALLE Subprozesse eines process fehlen, ist die Summe None
+        # (=> Status "... fehlt").
+        mtt_values = [v for v in (r.get("board_tactTime_brutto") for r in rows) if v is not None]
+        mtt_sum = sum(mtt_values) if mtt_values else None
 
-        ptt_values = [ptt_map.get((proj_nr, process, r["subProcess"])) for r in rows]
-        if any(v is None for v in ptt_values):
-            ptt_sum = None
-        else:
-            ptt_sum = sum(ptt_values)
+        ptt_values = [v for v in (ptt_map.get((proj_nr, process, r["subProcess"])) for r in rows) if v is not None]
+        ptt_sum = sum(ptt_values) if ptt_values else None
 
         abw, abw_pct = _deviation(mtt_sum, ptt_sum)
         status = classify(abw_pct, thresholds)
@@ -155,8 +153,13 @@ def sort_process_rows(rows, sort_by="projNr", descending=False):
     return sorted(rows, key=key_func, reverse=descending)
 
 
-def totals(sub_process_rows):
-    """Summen über alle process/subProcess: board_tactTime_brutto, panel_tactTime_brutto."""
-    board_sum = sum(r.get("board_tactTime_brutto") or 0 for r in sub_process_rows)
-    panel_sum = sum(r.get("panel_tactTime_brutto") or 0 for r in sub_process_rows)
-    return {"board_tactTime_brutto_sum": board_sum, "panel_tactTime_brutto_sum": panel_sum}
+def totals(process_rows):
+    """Summen ueber die PROZESS-Zeilen eines Projekts (Subprozesse fliessen
+    bewusst NICHT ein - die sind in den Projektdetails nur Zusatzinformation):
+    Summe MTT, Summe PTT, Summe Abw. Fehlende Werte (None, z.B. PTT fehlt fuer
+    einen Prozess) werden bei der jeweiligen Summe uebersprungen statt sie auf
+    0 zu setzen."""
+    mtt_sum = sum(r["mtt"] for r in process_rows if r.get("mtt") is not None)
+    ptt_sum = sum(r["ptt"] for r in process_rows if r.get("ptt") is not None)
+    abweichung_sum = sum(r["abweichung"] for r in process_rows if r.get("abweichung") is not None)
+    return {"mtt_sum": mtt_sum, "ptt_sum": ptt_sum, "abweichung_sum": abweichung_sum}

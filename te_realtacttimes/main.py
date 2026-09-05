@@ -62,6 +62,17 @@ def format_komma(value, decimals=None):
     return value
 
 
+def format_statuscolor(status):
+    """CSS-Klasse fuer die Schriftfarbe der Spalten Abw./Abw.% je nach Status:
+    OK = gruen, Warngrenze = orange, Aktionsgrenze = rot, alles andere = schwarz."""
+    mapping = {
+        config.STATUS_OK: "status-ok",
+        config.STATUS_WARN: "status-warn",
+        config.STATUS_ACTION: "status-action",
+    }
+    return mapping.get(status, "")
+
+
 def create_app():
     app = Flask(
         __name__,
@@ -71,6 +82,7 @@ def create_app():
     app.secret_key = secrets.token_hex(16)
     app.config["UPLOAD_FOLDER"] = config.UPLOAD_FOLDER
     app.jinja_env.filters["komma"] = format_komma
+    app.jinja_env.filters["statuscolor"] = format_statuscolor
 
     from gui.routes import main_bp, bewerten_bp, konfiguration_bp, ptt_bp, infor_bp, api_bp
     app.register_blueprint(main_bp)

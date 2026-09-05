@@ -1,0 +1,62 @@
+<div class="modal-backdrop" onclick="if(event.target===this) schliesseInforBestaetigung()">
+    <div class="modal-box modal-box-lg">
+        <div class="modal-header">
+            <span>Übernahme nach Infor bestätigen{% if proj_nr %} – {{ proj_nr }}{% endif %}</span>
+            <span class="modal-close" onclick="schliesseInforBestaetigung()">&#10005;</span>
+        </div>
+        <div class="modal-body">
+            {% if not selected_rows %}
+            <p class="text-muted">Es wurde kein Prozess zur Übernahme markiert.</p>
+            <div class="form-actions">
+                <button type="button" class="btn" onclick="schliesseInforBestaetigung()">Schließen</button>
+            </div>
+            {% else %}
+            <p><span class="field-label" style="display:inline;">Bearbeiter:</span> {{ bearbeiter }}</p>
+
+            <div class="table-wrapper mt-1">
+                <table class="data-table">
+                    <thead>
+                    <tr>
+                        <th>Prozess</th>
+                        <th class="text-center">MTT (min)</th>
+                        <th class="text-center">PTT (min)</th>
+                        <th class="text-center">Abw.</th>
+                        <th class="text-center">Korrektur (neu an Infor)</th>
+                    </tr>
+                    </thead>
+                    <tbody>
+                    {% for r in selected_rows %}
+                    <tr>
+                        <td>{{ r.process }}</td>
+                        <td class="num-center">{{ r.mtt|komma(4) if r.mtt is not none else "–" }}</td>
+                        <td class="num-center">{{ r.ptt|komma(4) if r.ptt is not none else "–" }}</td>
+                        <td class="num-center {{ r.status|statuscolor }}">{{ r.abweichung|komma(4) if r.abweichung is not none else "–" }}</td>
+                        <td class="num-center text-bold">{{ r.ptt_neu|komma(4) if r.ptt_neu is not none else "–" }}</td>
+                    </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+
+            <div class="form-field mt-2">
+                <label class="field-label" for="inforInfoText">Info</label>
+                <div class="richtext-toolbar">
+                    <button type="button" title="Fett" onclick="richtextExec('bold')"><b>F</b></button>
+                    <button type="button" title="Kursiv" onclick="richtextExec('italic')"><i>K</i></button>
+                    <button type="button" title="Unterstrichen" onclick="richtextExec('underline')"><u>U</u></button>
+                    <button type="button" title="Aufzählung" onclick="richtextExec('insertUnorderedList')">&#8226; Liste</button>
+                    <button type="button" title="Nummerierte Liste" onclick="richtextExec('insertOrderedList')">1. Liste</button>
+                </div>
+                <div id="inforInfoText" class="richtext-editor" contenteditable="true"></div>
+            </div>
+
+            <div id="inforUebernahmeFehler" class="text-error text-sm mt-1 hidden"></div>
+
+            <div class="form-actions">
+                <button type="button" id="inforConfirmBtn" class="btn btn-primary" onclick="bestaetigeInforUebernahme()">Übernehmen</button>
+                <button type="button" class="btn" onclick="schliesseInforBestaetigung()">Abbrechen</button>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>

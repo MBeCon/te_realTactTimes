@@ -6,9 +6,6 @@
         <div class="page-title">Bewerten</div>
         <div class="page-subtitle">Gegenüberstellung MTT (Ist) vs. PTT (Soll) je Projekt und Prozess</div>
     </div>
-    <div class="page-actions">
-        <button type="submit" form="ttcheckForm" class="btn btn-primary">&#9654; TTCheck ausführen</button>
-    </div>
 </div>
 
 <div class="bewerten-layout">
@@ -46,14 +43,29 @@
                 {% elif not alle_projekte %}
                 <p class="text-muted">Keine Projekte gefunden.</p>
                 {% else %}
-                <div class="form-field mb-2" style="max-width:220px;">
-                    <label class="field-label" for="projekteFilterInput">Filter: Projektnummer</label>
-                    <input type="text" id="projekteFilterInput" oninput="projekteFilterUpdate()" placeholder="z.B. 0067">
+                <div class="projekte-toolbar mb-2">
+                    <div class="form-field">
+                        <label class="field-label" for="projekteFilterInput">Filter: Projektnummer</label>
+                        <input type="text" id="projekteFilterInput" oninput="projekteFilterUpdate()" placeholder="z.B. 0067">
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm">&#9654; TTCheck ausführen</button>
                 </div>
                 <div class="flex-gap mb-2" style="align-items:center;">
                     <button type="button" class="btn btn-sm" onclick="projekteAuswahl(true)">Alle</button>
                     <button type="button" class="btn btn-sm" onclick="projekteAuswahl(false)">Keine</button>
                     <span class="text-sm text-muted" id="projekteCountText"></span>
+                </div>
+                <div class="flex-gap mb-2" style="align-items:center; flex-wrap:wrap;">
+                    <span class="text-sm text-muted">Sortieren:</span>
+                    <label style="display:flex; align-items:center; gap:4px; font-size:10px; cursor:pointer;">
+                        <input type="checkbox" id="sortByStatus" checked onchange="projekteSortFieldChanged('status', this)"> Status
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; font-size:10px; cursor:pointer;">
+                        <input type="checkbox" id="sortByProjNr" onchange="projekteSortFieldChanged('projnr', this)"> Projektnummer
+                    </label>
+                    <label style="display:flex; align-items:center; gap:4px; font-size:10px; cursor:pointer;">
+                        <input type="checkbox" id="sortDesc" onchange="projekteSortUpdate()"> absteigend
+                    </label>
                 </div>
                 {% if stale_projekte %}
                 <p class="text-sm text-muted mb-2">
@@ -137,6 +149,21 @@
             {% elif not rows %}
             <p class="text-muted">Keine Ergebnisse für die aktuelle Filterung/Projektauswahl.</p>
             {% else %}
+            {% set status_tooltips = {
+                'ok': 'OK: Die Abweichung zwischen MTT und PTT liegt innerhalb der Warngrenze ('
+                    ~ thresholds.warn_lower_pct|komma(1) ~ '% bis ' ~ thresholds.warn_upper_pct|komma(1)
+                    ~ '%) und der Aktionsgrenze (' ~ thresholds.action_lower_pct|komma(1) ~ '% bis '
+                    ~ thresholds.action_upper_pct|komma(1) ~ '%).',
+                'warn': 'Warngrenze: Die Abweichung zwischen MTT und PTT übersteigt die konfigurierte Warngrenze ('
+                    ~ thresholds.warn_lower_pct|komma(1) ~ '% bis ' ~ thresholds.warn_upper_pct|komma(1)
+                    ~ '%), liegt aber unterhalb der Aktionsgrenze (' ~ thresholds.action_lower_pct|komma(1)
+                    ~ '% bis ' ~ thresholds.action_upper_pct|komma(1) ~ '%).',
+                'action': 'Aktionsgrenze: Die Abweichung zwischen MTT und PTT übersteigt die konfigurierte Warngrenze ('
+                    ~ thresholds.warn_lower_pct|komma(1) ~ '% bis ' ~ thresholds.warn_upper_pct|komma(1)
+                    ~ '%) UND die Aktionsgrenze (' ~ thresholds.action_lower_pct|komma(1) ~ '% bis '
+                    ~ thresholds.action_upper_pct|komma(1) ~ '%).',
+                'no_ptt': 'PTT fehlt: Der PTT-Wert (Sollwert) fehlt, daher kann die Abweichung nicht berechnet werden.',
+            } %}
             <div class="table-wrapper">
                 <table class="data-table">
                     <thead>
@@ -157,10 +184,11 @@
                         <td>{{ r.process }}</td>
                         <td class="num-center">{{ r.mtt|komma(4) if r.mtt is not none else "–" }}</td>
                         <td class="num-center">{{ r.ptt|komma(4) if r.ptt is not none else "–" }}</td>
-                        <td class="num-center">{{ r.abweichung|komma(4) if r.abweichung is not none else "–" }}</td>
-                        <td class="num-center">{{ r.abweichung_pct|komma(1) ~ "%" if r.abweichung_pct is not none else "–" }}</td>
+                        <td class="num-center text-bold {{ r.status|statuscolor }}">{{ r.abweichung|komma(4) if r.abweichung is not none else "–" }}</td>
+                        <td class="num-center {{ r.status|statuscolor }}">{{ r.abweichung_pct|komma(1) ~ "%" if r.abweichung_pct is not none else "–" }}</td>
                         <td>
-                            <span class="badge badge-{{ 'success' if r.status=='ok' else ('warning' if r.status=='warn' else ('error' if r.status=='action' else 'muted')) }}">
+                            <span class="badge badge-{{ 'success' if r.status=='ok' else ('warning' if r.status=='warn' else ('error' if r.status=='action' else 'muted')) }}"
+                                  title="{{ status_tooltips.get(r.status, '') }}">
                                 {{ r.status_label }}
                             </span>
                         </td>
@@ -173,10 +201,13 @@
             {% endif %}
         </div>
     </div>
+
+    <div class="workspace-empty"></div>
 </div>
 
 <div id="projektdetailsModalContainer"></div>
 <div id="processModalContainer"></div>
+<div id="inforConfirmModalContainer"></div>
 {% endblock %}
 
 {% block extra_scripts %}
@@ -190,6 +221,7 @@ function ladeProjektdetails(procFilter) {
         + (params.length ? ('?' + params.join('&')) : '');
     fetch(url).then(r => r.text()).then(html => {
         body.innerHTML = html;
+        korrekturSummeUpdate();
     });
 }
 
@@ -200,6 +232,7 @@ function oeffneProjektdetailsPopup(projNr, procFilter) {
         + (params.length ? ('?' + params.join('&')) : '');
     fetch(url).then(r => r.text()).then(html => {
         document.getElementById('projektdetailsModalContainer').innerHTML = html;
+        korrekturSummeUpdate();
     });
 }
 
@@ -210,6 +243,100 @@ function schliesseProjektdetailsPopup() {
 function toggleKorrektur(cb) {
     const input = document.getElementById('korrektur_' + cb.value);
     if (input) input.disabled = !cb.checked;
+}
+
+// Summe der Spalte "Korrektur board_tactTime_brutto" im Projektdetails-PopUp:
+// wird beim Laden/Neuladen des PopUp-Inhalts aufgerufen (siehe
+// ladeProjektdetails()/oeffneProjektdetailsPopup() oben) UND bei jeder
+// manuellen Aenderung eines Korrektur-Feldes (oninput, siehe
+// _projektdetails.html) - summiert IMMER alle Korrektur-Felder (nicht nur
+// die per Checkbox "Übernehmen" aktivierten), da die Zelle die Summe der
+// angezeigten Werte zeigt, nicht der tatsaechlich zu uebernehmenden Werte.
+function korrekturSummeUpdate() {
+    const zelle = document.getElementById('korrekturSummeCell');
+    if (!zelle) return;
+    const felder = document.querySelectorAll('.korrektur-feld');
+    let summe = 0;
+    let hatWert = false;
+    felder.forEach(feld => {
+        const text = (feld.value || '').trim().replace(',', '.');
+        if (text === '') return;
+        const wert = parseFloat(text);
+        if (!isNaN(wert)) {
+            summe += wert;
+            hatWert = true;
+        }
+    });
+    zelle.textContent = hatWert ? summe.toFixed(4).replace('.', ',') : '–';
+}
+
+// ===== Bestätigungs-PopUp "nach Infor übernehmen" =====
+// Ablauf: Klick auf "nach Infor übernehmen" im Projektdetails-PopUp ruft
+// oeffneInforBestaetigung() auf. Diese merkt sich die aktuell markierten
+// Prozesse/Korrektur-Werte (FormData des Projektdetails-Formulars) und laedt
+// vom Server eine Zusammenfassung + Bearbeiter + Info-Feld (Richtext) als
+// zweites PopUp. Erst der Klick auf "Übernehmen" im Bestätigungs-PopUp
+// speichert tatsaechlich (POST an bewerten.infor_uebernehmen, liefert JSON
+// statt eines Redirects, da kein Seitenneuaufbau stattfindet). "Abbrechen"
+// verwirft die gemerkten Daten wieder, ohne etwas zu speichern.
+let inforUebernehmenFormData = null;
+
+function oeffneInforBestaetigung(form) {
+    if (!form) return;
+    const checked = form.querySelectorAll('input[name="uebernehmen"]:checked');
+    if (checked.length === 0) {
+        alert('Es wurde kein Prozess zur Übernahme markiert.');
+        return;
+    }
+    inforUebernehmenFormData = new FormData(form);
+    fetch('{{ url_for("bewerten.infor_uebernehmen_vorschau") }}', {method: 'POST', body: inforUebernehmenFormData})
+        .then(r => r.text())
+        .then(html => {
+            document.getElementById('inforConfirmModalContainer').innerHTML = html;
+        });
+}
+
+function schliesseInforBestaetigung() {
+    document.getElementById('inforConfirmModalContainer').innerHTML = '';
+    inforUebernehmenFormData = null;
+}
+
+function richtextExec(command) {
+    document.execCommand(command, false, null);
+    const editor = document.getElementById('inforInfoText');
+    if (editor) editor.focus();
+}
+
+function bestaetigeInforUebernahme() {
+    if (!inforUebernehmenFormData) return;
+    const btn = document.getElementById('inforConfirmBtn');
+    const fehlerBox = document.getElementById('inforUebernahmeFehler');
+    const editor = document.getElementById('inforInfoText');
+    inforUebernehmenFormData.set('info', editor ? editor.innerHTML.trim() : '');
+    if (btn) btn.disabled = true;
+    if (fehlerBox) fehlerBox.classList.add('hidden');
+    fetch('{{ url_for("bewerten.infor_uebernehmen") }}', {method: 'POST', body: inforUebernehmenFormData})
+        .then(r => r.json())
+        .then(result => {
+            if (result.ok) {
+                schliesseInforBestaetigung();
+                schliesseProjektdetailsPopup();
+                alert('Übernahme an Infor durchgeführt!');
+            } else {
+                if (btn) btn.disabled = false;
+                if (fehlerBox) {
+                    fehlerBox.textContent = result.error || 'Übernahme fehlgeschlagen.';
+                    fehlerBox.classList.remove('hidden');
+                }
+            }
+        })
+        .catch(() => {
+            if (btn) btn.disabled = false;
+            if (fehlerBox) {
+                fehlerBox.textContent = 'Übernahme fehlgeschlagen (Netzwerk-/Serverfehler).';
+                fehlerBox.classList.remove('hidden');
+            }
+        });
 }
 
 function oeffneProcessPopup(projNr, process) {
@@ -250,7 +377,51 @@ function projekteCountUpdate() {
     label.textContent = angehakt + ' von ' + boxen.length + ' ausgewählt';
 }
 
-document.addEventListener('DOMContentLoaded', projekteCountUpdate);
+function projekteProjNrText(label) {
+    const t = label.querySelector('.proj-label-text');
+    return t ? t.textContent.trim() : '';
+}
+
+// Sortierung der Projekte-Liste (rein clientseitig, wie schon der Filter):
+// nach Status (veraltete Infor-Übernahme zuerst/zuletzt) oder nach
+// Projektnummer, je auf-/absteigend. "Status" und "Projektnummer" verhalten
+// sich wie Radiobuttons (immer genau einer der beiden angehakt), sind aber
+// bewusst als Checkboxen umgesetzt.
+function projekteSortFieldChanged(field, checkbox) {
+    const other = document.getElementById(field === 'status' ? 'sortByProjNr' : 'sortByStatus');
+    if (checkbox.checked && other) {
+        other.checked = false;
+    } else if (!checkbox.checked) {
+        // Mindestens eine Sortierart muss aktiv bleiben.
+        checkbox.checked = true;
+    }
+    projekteSortUpdate();
+}
+
+function projekteSortUpdate() {
+    const liste = document.getElementById('projekteListe');
+    if (!liste) return;
+    const sortByStatus = document.getElementById('sortByStatus');
+    const sortDesc = document.getElementById('sortDesc');
+    const nachStatus = !!(sortByStatus && sortByStatus.checked);
+    const absteigend = !!(sortDesc && sortDesc.checked);
+    const labels = Array.from(liste.querySelectorAll('label'));
+    labels.sort((a, b) => {
+        let cmp = 0;
+        if (nachStatus) {
+            const aVeraltet = a.classList.contains('projekt-stale') ? 1 : 0;
+            const bVeraltet = b.classList.contains('projekt-stale') ? 1 : 0;
+            cmp = bVeraltet - aVeraltet;
+        }
+        if (cmp === 0) {
+            cmp = projekteProjNrText(a).localeCompare(projekteProjNrText(b), undefined, { numeric: true, sensitivity: 'base' });
+        }
+        return absteigend ? -cmp : cmp;
+    });
+    labels.forEach(l => liste.appendChild(l));
+}
+
+document.addEventListener('DOMContentLoaded', () => { projekteCountUpdate(); projekteSortUpdate(); });
 {% if selected_proj %}
 document.addEventListener('DOMContentLoaded', () => oeffneProjektdetailsPopup('{{ selected_proj }}', {{ (proc_filter or '')|tojson }}));
 {% endif %}

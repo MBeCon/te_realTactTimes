@@ -18,6 +18,7 @@ SQL-Text für beide Treiber verwendet werden.
 """
 
 import datetime
+import uuid
 import logging
 import sqlite3
 from contextlib import contextmanager
@@ -213,7 +214,9 @@ _DDL = {
                 [abweichung] FLOAT NULL,
                 [abweichung_pct] FLOAT NULL,
                 [ptt_neu] FLOAT NOT NULL,
-                [status] NVARCHAR(20) NOT NULL DEFAULT 'offen'
+                [status] NVARCHAR(20) NOT NULL DEFAULT 'offen',
+                [info] NVARCHAR(MAX) NULL,
+                [vorgang_id] NVARCHAR(64) NULL
             );
         """,
         "sqlite": """
@@ -228,7 +231,9 @@ _DDL = {
                 [abweichung] REAL,
                 [abweichung_pct] REAL,
                 [ptt_neu] REAL NOT NULL,
-                [status] TEXT NOT NULL DEFAULT 'offen'
+                [status] TEXT NOT NULL DEFAULT 'offen',
+                [info] TEXT,
+                [vorgang_id] TEXT
             );
         """,
     },
@@ -259,6 +264,61 @@ _DDL = {
         """,
     },
 }
+
+
+# Spalten, die NACH der urspruenglichen Tabellenanlage hinzugekommen sind:
+# CREATE TABLE IF NOT EXISTS (sqlite) bzw. das IF NOT EXISTS-Guard (mssql) legt
+# bei einer bereits bestehenden Tabelle KEINE fehlenden Spalten nach - daher
+# uebernimmt _ensure_extra_columns() das per ALTER TABLE, wenn ensure_app_tables()
+# eine bereits vorhandene Tabelle vorfindet, die eine neuere Spalte noch nicht hat.
+_EXTRA_COLUMNS = {
+    "infor_changes": [
+        # (Spaltenname, SQLite-Typ, MSSQL-Typ)
+        ("info", "TEXT", "NVARCHAR(MAX)"),
+        # Eindeutige ID je Uebernahme-VORGANG (1 Klick auf "Uebernehmen" im
+        # Bestaetigungs-PopUp = 1 vorgang_id, geteilt von allen Prozess-Zeilen
+        # dieses Klicks). Noetig, weil (projNr, uebernahmedatum, bearbeiter)
+        # allein NICHT eindeutig ist: uebernahmedatum hat nur Sekunden-
+        # Genauigkeit, zwei getrennte Uebernahmen derselben Person fuer
+        # dasselbe Projekt innerhalb derselben Sekunde wuerden sonst faelschlich
+        # zu einem einzigen "Vorgang" verschmolzen (siehe
+        # dokumentation.group_infor_changes_by_uebernahme).
+        ("vorgang_id", "TEXT", "NVARCHAR(64)"),
+    ],
+}
+
+
+def _existing_columns(conn, driver, table):
+    """Liefert die (kleingeschriebenen) Spaltennamen einer bestehenden Tabelle."""
+    cur = conn.cursor()
+    if driver == "mssql":
+        schema, _, bare = table.partition(".")
+        if not bare:
+            schema, bare = "dbo", schema
+        cur.execute(
+            "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+            "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?",
+            [schema, bare],
+        )
+        return {row[0].lower() for row in cur.fetchall()}
+    bare = table.split(".", 1)[1] if table.lower().startswith("dbo.") else table
+    cur.execute(f"PRAGMA table_info([{bare}])")
+    return {row[1].lower() for row in cur.fetchall()}
+
+
+def _ensure_extra_columns(conn, driver, key, table):
+    """Fuegt neu eingefuehrte Spalten per ALTER TABLE nach, falls die Tabelle
+    schon vor Einfuehrung dieser Spalte angelegt wurde (siehe _EXTRA_COLUMNS)."""
+    extras = _EXTRA_COLUMNS.get(key)
+    if not extras:
+        return
+    existing = _existing_columns(conn, driver, table)
+    cur = conn.cursor()
+    for column, sqlite_type, mssql_type in extras:
+        if column.lower() in existing:
+            continue
+        coltype = mssql_type if driver == "mssql" else sqlite_type
+        cur.execute(f"ALTER TABLE {_qtable(table)} ADD [{column}] {coltype} NULL")
 
 
 def _table_exists(conn, driver, table):
@@ -321,6 +381,7 @@ def ensure_app_tables(server_key=None):
                         f"abweichende Datenbank/Schema-Berechtigung oder ein "
                         f"serverseitiger DDL-Trigger, der die Anlage verhindert."
                     )
+                _ensure_extra_columns(conn, driver, key, table)
         except Exception as exc:  # noqa: BLE001
             logger.exception("Konnte App-Tabelle %s (%s) nicht anlegen", key, table)
             fehler[key] = str(exc)
@@ -572,19 +633,32 @@ def save_tact_time_check_rows(rows, bearbeiter, server_key=None):
     return len(params)
 
 
-def save_infor_change_rows(rows, bearbeiter, server_key=None):
-    """Speichert die vom Nutzer freigegebenen Korrekturwerte (Button 'übernehmen')."""
+def save_infor_change_rows(rows, bearbeiter, info=None, server_key=None):
+    """Speichert die vom Nutzer freigegebenen Korrekturwerte (Button 'übernehmen').
+
+    info: optionaler Freitext (Richtext-HTML) aus dem Bestätigungs-PopUp, wird
+    fuer jede Zeile derselben Übernahme identisch mitgespeichert.
+
+    Alle Zeilen EINES Aufrufs (= ein Klick auf "Übernehmen") teilen sich
+    zusätzlich eine neu generierte `vorgang_id` (UUID4-Hex) - das ist der
+    zuverlässige Gruppierungsschlüssel für "1 Übernahme-Vorgang" in der GUI
+    (siehe dokumentation.group_infor_changes_by_uebernahme), weil
+    `uebernahmedatum` nur Sekunden-Genauigkeit hat und daher allein NICHT
+    garantiert eindeutig zwei getrennte, aber schnell aufeinanderfolgende
+    Übernahmen derselben Person für dasselbe Projekt unterscheiden könnte.
+    """
     _, profile = get_server_profile(server_key)
     table = _table_name("infor_changes", profile["driver"])
     now = _now_str()
+    vorgang_id = uuid.uuid4().hex
     sql = (
         f"INSERT INTO {_qtable(table)} "
-        f"([projNr], [uebernahmedatum], [bearbeiter], [process], [mtt], [ptt], [abweichung], [abweichung_pct], [ptt_neu], [status]) "
-        f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offen')"
+        f"([projNr], [uebernahmedatum], [bearbeiter], [process], [mtt], [ptt], [abweichung], [abweichung_pct], [ptt_neu], [status], [info], [vorgang_id]) "
+        f"VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'offen', ?, ?)"
     )
     params = [
         (r["projNr"], now, bearbeiter, r["process"], r["mtt"], r["ptt"],
-         r["abweichung"], r["abweichung_pct"], r["ptt_neu"])
+         r["abweichung"], r["abweichung_pct"], r["ptt_neu"], info, vorgang_id)
         for r in rows
     ]
     if params:
